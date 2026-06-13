@@ -16,6 +16,9 @@ export type TriggerResult = {
   logId?: string;
 };
 
+// Assembly-related event key prefixes — these require commission-eligible products
+const ASSEMBLY_EVENT_PREFIXES = ["MONTAGEM_", "ASSEMBLY_", "AGENDA_MONTAGEM"];
+
 export class MessageTriggerService {
   constructor(private readonly logs = new MessageLogService()) {}
 
@@ -41,7 +44,32 @@ export class MessageTriggerService {
       return { status: "IGNORADO_EVENTO_INATIVO", reason: "Evento inativo", logId: id };
     }
 
-    // 2. Global mode (overrides per-event mode if set to DRY_RUN)
+    // 2. For assembly events — skip if no commission-eligible products are configured
+    const isAssemblyEvent = ASSEMBLY_EVENT_PREFIXES.some((p) =>
+      event.eventKey.toUpperCase().startsWith(p),
+    );
+    if (isAssemblyEvent) {
+      const itemCheck = await queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) AS CNT
+         FROM MONT_ASSEMBLY_JOB_ITEMS ji
+         JOIN MONT_ASSEMBLY_JOBS j ON j.ID = ji.ASSEMBLY_JOB_ID
+         JOIN MONT_ORDERS o ON o.ID = j.ORDER_ID
+         WHERE TO_CHAR(o.NUMPED) = TO_CHAR(:numped)`,
+        { numped: event.numped },
+      ).catch(() => null);
+      if (!itemCheck || Number(itemCheck.cnt) === 0) {
+        const { id } = await this.logs.log({
+          numped:   event.numped,
+          codcli:   event.codcli,
+          eventKey: event.eventKey,
+          status:   "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM",
+          modoEnvio: config?.modo_envio ?? "DRY_RUN",
+        });
+        return { status: "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM", reason: "Pedido sem itens com comissão de montagem configurada", logId: id };
+      }
+    }
+
+    // 3. Global mode (overrides per-event mode if set to DRY_RUN)
     const globalModeRow = await queryOne<{ config_value: string }>(
       "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'MESSAGE_TRIGGER_MODE'",
     );

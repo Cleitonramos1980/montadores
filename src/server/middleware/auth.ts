@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
+import jwt from "jsonwebtoken";
 import { config } from "../config";
 
 export interface JwtPayload {
@@ -21,30 +21,41 @@ declare global {
   }
 }
 
-function b64url(data: string): string {
-  return Buffer.from(data).toString("base64url");
+// In-memory cache for token version checks — prevents fail-open when Oracle is offline
+const _tokenVersionCache = new Map<string, { tokenVersion: number; fetchedAt: number }>();
+const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCachedVersion(userId: string): number | null {
+  const cached = _tokenVersionCache.get(userId);
+  if (!cached) return null;
+  if (Date.now() - cached.fetchedAt > TOKEN_CACHE_TTL_MS) {
+    _tokenVersionCache.delete(userId);
+    return null;
+  }
+  return cached.tokenVersion;
 }
 
-function b64urlDecode(data: string): string {
-  return Buffer.from(data, "base64url").toString("utf8");
+function setCachedVersion(userId: string, tokenVersion: number): void {
+  _tokenVersionCache.set(userId, { tokenVersion, fetchedAt: Date.now() });
 }
 
 export function signJwt(payload: Omit<JwtPayload, "iat">): string {
-  const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const body = b64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000) }));
-  const sig = createHmac("sha256", config.jwtSecret).update(`${header}.${body}`).digest("base64url");
-  return `${header}.${body}.${sig}`;
+  return jwt.sign(
+    { ...payload, iat: Math.floor(Date.now() / 1000) },
+    config.jwtSecret,
+    { algorithm: "HS256" },
+  );
 }
 
 export function verifyJwt(token: string): JwtPayload {
-  const parts = token.split(".");
-  if (parts.length !== 3) throw new Error("Token inválido.");
-  const [header, body, sig] = parts;
-  const expected = createHmac("sha256", config.jwtSecret).update(`${header}.${body}`).digest("base64url");
-  if (sig !== expected) throw new Error("Assinatura do token inválida.");
-  const payload = JSON.parse(b64urlDecode(body)) as JwtPayload;
-  if (payload.exp < Math.floor(Date.now() / 1000)) throw new Error("Token expirado. Faça login novamente.");
-  return payload;
+  try {
+    return jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] }) as JwtPayload;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "";
+    throw new Error(
+      msg.includes("expired") ? "Token expirado. Faça login novamente." : "Token inválido.",
+    );
+  }
 }
 
 export function requireRole(...requiredRoles: string[]) {
@@ -75,15 +86,15 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 
   // Verify token version — revoke old tokens after password reset
   import("../db/db").then(({ queryOne }) =>
-    queryOne<{ token_version: number; revoked_before: string | null }>(
-      "SELECT NVL(TOKEN_VERSION,0) AS TOKEN_VERSION, REVOKED_BEFORE FROM MONT_USERS WHERE ID = :id",
+    queryOne<{ token_version: number }>(
+      "SELECT NVL(TOKEN_VERSION,0) AS TOKEN_VERSION FROM MONT_USERS WHERE ID = :id",
       { id: payload.sub },
     )
   ).then((row) => {
     if (row) {
       const dbVersion = Number(row.token_version ?? 0);
-      const tkv = payload.tkv ?? 0;
-      if (tkv < dbVersion) {
+      setCachedVersion(payload.sub, dbVersion);
+      if ((payload.tkv ?? 0) < dbVersion) {
         res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
         return;
       }
@@ -91,8 +102,17 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     req.user = payload;
     next();
   }).catch(() => {
-    // Fail open if DB is unavailable — do not lock out all users
-    req.user = payload;
-    next();
+    // Oracle offline — use cached version; fail-closed if no cache entry
+    const cachedVersion = getCachedVersion(payload.sub);
+    if (cachedVersion !== null) {
+      if ((payload.tkv ?? 0) < cachedVersion) {
+        res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
+        return;
+      }
+      req.user = payload;
+      next();
+    } else {
+      res.status(503).json({ error: "Serviço temporariamente indisponível. Tente novamente em breve." });
+    }
   });
 }

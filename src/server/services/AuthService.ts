@@ -1,11 +1,26 @@
 import { createHash } from "node:crypto";
+import bcrypt from "bcrypt";
 import { v4 as uuid } from "uuid";
 import { config } from "../config";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { signJwt } from "../middleware/auth";
 
-function hashPassword(password: string): string {
+const BCRYPT_ROUNDS = 12;
+
+function legacySha256Hash(password: string): string {
   return createHash("sha256").update(`${password}:montadores:${config.jwtSecret}`).digest("hex");
+}
+
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$")) {
+    return bcrypt.compare(password, storedHash);
+  }
+  // Legacy SHA-256 — migrated transparently on next login
+  return legacySha256Hash(password) === storedHash;
 }
 
 export class AuthService {
@@ -24,8 +39,17 @@ export class AuthService {
     if (!user) throw new Error("Credenciais inválidas.");
     if (user.status !== "ATIVO") throw new Error("Usuário inativo ou bloqueado.");
 
-    const hash = hashPassword(password);
-    if (hash !== user.password_hash) throw new Error("Credenciais inválidas.");
+    const valid = await verifyPassword(password, user.password_hash);
+    if (!valid) throw new Error("Credenciais inválidas.");
+
+    // Migrate legacy SHA-256 hash to bcrypt on successful login
+    if (!user.password_hash.startsWith("$2b$") && !user.password_hash.startsWith("$2a$")) {
+      const newHash = await hashPassword(password);
+      await execDml(
+        "UPDATE MONT_USERS SET PASSWORD_HASH = :hash, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+        { hash: newHash, id: user.id },
+      ).catch(() => {});
+    }
 
     const [roles, filiaisRows] = await Promise.all([
       queryRows<{ name: string }>(
@@ -73,7 +97,7 @@ export class AuthService {
   }
 
   static hashPassword(password: string): string {
-    return hashPassword(password);
+    return legacySha256Hash(password);
   }
 
   async forgotPassword(email: string): Promise<{ message: string; token?: string }> {
@@ -95,9 +119,12 @@ export class AuthService {
       { id: uuid(), userId: user.id, tokenHash, expiresAt },
     );
 
-    // DRY_RUN — log token for admin; in production wire to email service
+    // DRY_RUN — token exposed only in non-production for admin use
     console.log(`[AuthService] Reset token ${user.email}: ${tokenRaw}`);
-    return { message: msg, token: tokenRaw };
+    if (!config.isProduction) {
+      return { message: msg, token: tokenRaw };
+    }
+    return { message: msg };
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
@@ -115,7 +142,7 @@ export class AuthService {
 
     await execDml(
       "UPDATE MONT_USERS SET PASSWORD_HASH = :hash, TOKEN_VERSION = NVL(TOKEN_VERSION,0) + 1, REVOKED_BEFORE = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { hash: hashPassword(newPassword), id: record.user_id },
+      { hash: await hashPassword(newPassword), id: record.user_id },
     );
     await execDml(
       "UPDATE MONT_PASSWORD_RESET_TOKENS SET USED_AT = SYSTIMESTAMP WHERE ID = :id",
@@ -132,7 +159,7 @@ export class AuthService {
     const id = uuid();
     await execDml(
       "INSERT INTO MONT_USERS (ID, NAME, EMAIL, PASSWORD_HASH, STATUS) VALUES (:id, :name, :email, :hash, 'ATIVO')",
-      { id, name: data.name, email: data.email, hash: hashPassword(data.password) },
+      { id, name: data.name, email: data.email, hash: await hashPassword(data.password) },
     );
     if (data.role) {
       const role = await queryOne<{ id: string }>(

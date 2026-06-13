@@ -63,6 +63,26 @@ function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) =
   };
 }
 
+// ── Rate limiting — 200 req/min per IP ────────────────────────────────────────
+const _rateLimitMap = new Map<string, number[]>();
+
+api.use((req: Request, res: Response, next: NextFunction): void => {
+  const ip =
+    (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+    req.socket.remoteAddress ||
+    "unknown";
+  const now = Date.now();
+  const windowStart = now - 60_000;
+  const timestamps = (_rateLimitMap.get(ip) ?? []).filter((t) => t > windowStart);
+  if (timestamps.length >= 200) {
+    res.status(429).json({ error: "Taxa de requisições excedida. Tente novamente em breve." });
+    return;
+  }
+  timestamps.push(now);
+  _rateLimitMap.set(ip, timestamps);
+  next();
+});
+
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 
 api.get("/health", asyncRoute(async (_req, res) => {
@@ -420,11 +440,11 @@ api.get("/assembly/provider/history", asyncRoute(async (req, res) => {
   const result = await Promise.all(
     jobs.map(async (job: any) => {
       const items = await qrItems<any>(
-        `SELECT i.PRODUCT_ID, i.DESCRIPTION, i.QUANTITY, i.ASSEMBLY_COST
-         FROM MONT_ORDER_ITEMS i
-         JOIN MONT_ORDERS o ON o.ID = i.ORDER_ID
-         JOIN MONT_ASSEMBLY_JOBS a ON a.ORDER_ID = o.ID
-         WHERE a.ID = :jobId AND i.REQUIRES_ASSEMBLY = 1`,
+        `SELECT ji.CODPROD AS PRODUCT_ID, ji.DESCRICAO AS DESCRIPTION,
+                ji.QUANTITY, ji.CALCULATED_AMOUNT AS ASSEMBLY_COST,
+                ji.VALOR_UNITARIO, ji.RULE_SOURCE, ji.COMMISSION_PERCENT
+         FROM MONT_ASSEMBLY_JOB_ITEMS ji
+         WHERE ji.ASSEMBLY_JOB_ID = :jobId`,
         { jobId: job.id },
       );
       return { ...job, items };
@@ -477,7 +497,7 @@ api.post("/reviews/atendimento/:numped/marcar-enviado", asyncRoute(async (req, r
 
 // Message templates
 api.get("/message-templates", asyncRoute(async (_req, res) => res.json(await messageTemplates.list())));
-api.put("/message-templates/:eventType", asyncRoute(async (req, res) => {
+api.put("/message-templates/:eventType", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
   const body = z.object({
     channel:        z.enum(["WHATSAPP", "SMS", "EMAIL"]),
     subject:        z.string().optional(),
@@ -516,7 +536,13 @@ api.put("/message-templates/:eventType", asyncRoute(async (req, res) => {
 api.get("/flow-ruler", asyncRoute(async (_req, res) => res.json(await flow.ruler())));
 
 // SAC
-api.get("/sac", asyncRoute(async (_req, res) => res.json(await sac.list())));
+api.get("/sac", asyncRoute(async (req, res) => {
+  const { page, pageSize } = z.object({
+    page:     z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  }).parse(req.query);
+  res.json(await sac.list(page, pageSize));
+}));
 api.get("/sac/:id", asyncRoute(async (req, res) => res.json(await sac.getById(param(req.params.id)))));
 api.post("/orders/:id/sac", asyncRoute(async (req, res) => {
   const body = z.object({

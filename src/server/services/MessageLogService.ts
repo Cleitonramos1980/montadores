@@ -10,7 +10,8 @@ export type MessageLogStatus =
   | "IGNORADO_SEM_TELEFONE"
   | "IGNORADO_FORA_DO_MODELO"
   | "IGNORADO_TEMPLATE_INATIVO"
-  | "IGNORADO_REGRA_NAO_VALIDADA";
+  | "IGNORADO_REGRA_NAO_VALIDADA"
+  | "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM";
 
 export type MessageLogEntry = {
   numped: string;

@@ -8,6 +8,8 @@ export type EligibleProduct = {
   codprod: string;
   descricao: string | null;
   quantity: number;
+  pvenda: number;
+  unidade: string | null;
   ruleSource: "product" | "department";
   ruleId: string;
   calculationType: string;
@@ -73,11 +75,15 @@ export class AssemblyEligibilityService {
       this.itemRepo.getItems(numped),
       queryRows<ProductRule>(
         `SELECT ID, CODPROD, CALCULATION_TYPE, COMMISSION_PERCENT, FIXED_AMOUNT
-         FROM MONT_PRODUCT_COMMISSIONS WHERE ACTIVE = 1`,
+         FROM MONT_PRODUCT_COMMISSIONS WHERE ACTIVE = 1
+         AND (VIGENCIA_INICIO IS NULL OR VIGENCIA_INICIO <= SYSDATE)
+         AND (VIGENCIA_FIM IS NULL OR VIGENCIA_FIM >= SYSDATE)`,
       ),
       queryRows<DeptRule>(
         `SELECT ID, CODEPTO, CALCULATION_TYPE, COMMISSION_PERCENT, FIXED_AMOUNT
-         FROM MONT_DEPT_COMMISSIONS WHERE ACTIVE = 1`,
+         FROM MONT_DEPT_COMMISSIONS WHERE ACTIVE = 1
+         AND (VIGENCIA_INICIO IS NULL OR VIGENCIA_INICIO <= SYSDATE)
+         AND (VIGENCIA_FIM IS NULL OR VIGENCIA_FIM >= SYSDATE)`,
       ),
     ]);
 
@@ -128,6 +134,8 @@ export class AssemblyEligibilityService {
         codprod,
         descricao: item.descricao ?? null,
         quantity: qt,
+        pvenda,
+        unidade: item.unidade ?? null,
         ruleSource: prodRule ? "product" : "department",
         ruleId: rule.id,
         calculationType: rule.calculation_type,

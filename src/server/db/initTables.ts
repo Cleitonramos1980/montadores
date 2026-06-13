@@ -735,7 +735,13 @@ const NEW_COLUMNS: ColumnDef[] = [
   // MONT_ASSEMBLY_JOB_ITEMS — campos financeiros adicionais
   { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_UNITARIO",  ddl: "NUMBER(14,4)" },
   { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_TOTAL_ITEM", ddl: "NUMBER(14,4)" },
+  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UNIDADE", ddl: "VARCHAR2(20)" },
   { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UPDATED_AT", ddl: "TIMESTAMP DEFAULT SYSTIMESTAMP" },
+  // Vigência de regras de comissão
+  { table: "MONT_PRODUCT_COMMISSIONS", column: "VIGENCIA_INICIO", ddl: "DATE" },
+  { table: "MONT_PRODUCT_COMMISSIONS", column: "VIGENCIA_FIM", ddl: "DATE" },
+  { table: "MONT_DEPT_COMMISSIONS", column: "VIGENCIA_INICIO", ddl: "DATE" },
+  { table: "MONT_DEPT_COMMISSIONS", column: "VIGENCIA_FIM", ddl: "DATE" },
   // MONT_ASSEMBLY_REWORKS — campos completos de rastreabilidade
   { table: "MONT_ASSEMBLY_REWORKS", column: "ORIGINAL_PROVIDER_ID", ddl: "VARCHAR2(36)" },
   { table: "MONT_ASSEMBLY_REWORKS", column: "NEW_PROVIDER_ID",      ddl: "VARCHAR2(36)" },

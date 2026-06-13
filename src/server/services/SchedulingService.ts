@@ -130,9 +130,13 @@ export class SchedulingService {
       for (const ep of eligResult.eligibleProducts) {
         await execDml(
           `INSERT INTO MONT_ASSEMBLY_JOB_ITEMS
-             (ID, ASSEMBLY_JOB_ID, CODPROD, DESCRICAO, QUANTITY, RULE_SOURCE, COMMISSION_PERCENT, FIXED_AMOUNT, CALCULATED_AMOUNT)
+             (ID, ASSEMBLY_JOB_ID, CODPROD, DESCRICAO, QUANTITY, RULE_SOURCE,
+              COMMISSION_PERCENT, FIXED_AMOUNT, CALCULATED_AMOUNT,
+              VALOR_UNITARIO, VALOR_TOTAL_ITEM, UNIDADE)
            VALUES
-             (:id, :jobId, :codprod, :descricao, :qty, :ruleSource, :commPct, :fixedAmt, :calcAmt)`,
+             (:id, :jobId, :codprod, :descricao, :qty, :ruleSource,
+              :commPct, :fixedAmt, :calcAmt,
+              :valorUnitario, :valorTotal, :unidade)`,
           {
             id: uuid(),
             jobId,
@@ -143,6 +147,9 @@ export class SchedulingService {
             commPct: ep.commissionPercent ?? null,
             fixedAmt: ep.fixedAmount ?? null,
             calcAmt: ep.estimatedCommission,
+            valorUnitario: ep.pvenda ?? null,
+            valorTotal: ep.pvenda != null ? ep.pvenda * ep.quantity : null,
+            unidade: ep.unidade ?? null,
           },
         );
       }

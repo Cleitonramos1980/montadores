@@ -42,7 +42,7 @@ export class SacService {
           if (job?.provider_id) {
             await execDml(
               `INSERT INTO MONT_ASSEMBLY_REWORKS
-                 (ID, ASSEMBLY_JOB_ID, PROVIDER_ID, SAC_ID, REASON, DESCRIPTION, STATUS)
+                 (ID, ASSEMBLY_JOB_ID, PROVIDER_ID, SAC_CASE_ID, REASON, DESCRIPTION, STATUS)
                VALUES (:id, :jobId, :providerId, :sacId, :reason, :description, 'PENDENTE')`,
               { id: uuid(), jobId: assemblyJobId, providerId: job.provider_id, sacId: id, reason, description },
             );
@@ -68,14 +68,23 @@ export class SacService {
     return { id };
   }
 
-  async list() {
-    return queryRows(
-      `SELECT s.*, o.NUMPED, c.NAME AS CUSTOMER_NAME
-       FROM MONT_SAC_CASES s
-       JOIN MONT_ORDERS o ON o.ID = s.ORDER_ID
-       JOIN MONT_CUSTOMERS c ON c.ID = o.CUSTOMER_ID
-       ORDER BY s.CREATED_AT DESC`,
-    );
+  async list(page = 1, pageSize = 20) {
+    const offset = (page - 1) * pageSize;
+    const [rows, countRow] = await Promise.all([
+      queryRows(
+        `SELECT s.ID, s.STATUS, s.REASON, s.DESCRIPTION, s.CREATED_AT, s.UPDATED_AT,
+                s.RESPONSIBLE_USER_ID, s.NEXT_ACTION_DATE, s.SLA_DEADLINE,
+                o.NUMPED, c.NAME AS CUSTOMER_NAME
+         FROM MONT_SAC_CASES s
+         JOIN MONT_ORDERS o ON o.ID = s.ORDER_ID
+         JOIN MONT_CUSTOMERS c ON c.ID = o.CUSTOMER_ID
+         ORDER BY s.CREATED_AT DESC
+         OFFSET :offset ROWS FETCH NEXT :pageSize ROWS ONLY`,
+        { offset, pageSize },
+      ),
+      queryOne<{ total: number }>("SELECT COUNT(*) AS TOTAL FROM MONT_SAC_CASES"),
+    ]);
+    return { rows, total: Number(countRow?.total ?? 0), page, pageSize };
   }
 
   async getById(id: string) {
