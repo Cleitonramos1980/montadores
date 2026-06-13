@@ -127,17 +127,30 @@ export function MetricCard({
   value,
   tone = "default",
   href,
+  onClick,
+  active,
 }: {
   label: string;
   value: ReactNode;
   tone?: string;
   href?: string;
+  onClick?: () => void;
+  active?: boolean;
 }) {
+  const clickable = !!(href || onClick);
   const card = (
-    <article className={`metric ${tone}${href ? " metric--link" : ""}`}>
+    <article
+      className={`metric ${tone}${clickable ? " metric--link" : ""}`}
+      onClick={onClick}
+      style={onClick ? {
+        cursor: "pointer",
+        outline: active ? "2px solid currentColor" : undefined,
+        outlineOffset: active ? 2 : undefined,
+      } : undefined}
+    >
       <span>{label}</span>
       <strong>{value}</strong>
-      {href && <span className="metricArrow">→</span>}
+      {clickable && <span className="metricArrow">{active ? "▲" : "▼"}</span>}
     </article>
   );
   return href ? (

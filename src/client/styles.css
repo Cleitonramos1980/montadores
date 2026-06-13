@@ -1018,3 +1018,88 @@ textarea {
     overflow-x: auto;
   }
 }
+
+/* ── PRINT / PDF ─────────────────────────────────────────────────────────────── */
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 14mm 12mm 14mm 12mm;
+  }
+
+  /* Hide non-report UI */
+  .sidebar,
+  .topbar,
+  .pageAction,
+  .metricsGrid,
+  .printHide,
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Reset shell layout — full width, no sidebar */
+  .shell {
+    display: block !important;
+  }
+
+  body, :root {
+    background: #fff !important;
+    font-size: 12px !important;
+  }
+
+  /* Page header — keep title only */
+  .pageHeader {
+    margin-bottom: 10px !important;
+    padding: 0 !important;
+  }
+
+  .pageHeader h1 {
+    font-size: 18px !important;
+  }
+
+  .pageHeader .pageSubtitle {
+    font-size: 11px !important;
+  }
+
+  /* Tables */
+  table {
+    width: 100% !important;
+    display: table !important;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+
+  th, td {
+    padding: 5px 8px !important;
+    border: 1px solid #ddd !important;
+  }
+
+  thead tr {
+    background: #f0f0f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Preserve background colors on print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Avoid page breaks inside a question card */
+  [data-print-card] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Phase card bars */
+  [data-print-bar] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Phase pipeline cards — hide in print (replaced by header in panel) */
+  [data-phase-pipeline] {
+    display: none !important;
+  }
+}

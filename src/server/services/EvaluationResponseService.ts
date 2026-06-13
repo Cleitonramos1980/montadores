@@ -65,10 +65,10 @@ export class EvaluationResponseService {
     await execDml(
       `INSERT INTO MONT_EVAL_RESPONSES
          (ID, LINK_ID, CONFIG_ID, ORDER_ID, ASSEMBLY_JOB_ID, NUMPED, CODCLI, PHASE,
-          SCORE, CLASSIFICATION, COMMENT, SAC_TRIGGERED, PAYMENT_IMPACT, IP, USER_AGENT)
+          SCORE, CLASSIFICATION, EVAL_COMMENT, SAC_TRIGGERED, PAYMENT_IMPACT, IP, USER_AGENT)
        VALUES
          (:id, :linkId, :configId, :orderId, :assemblyJobId, :numped, :codcli, :phase,
-          :score, :classification, :comment, 0, NULL, :ip, :userAgent)`,
+          :score, :classification, :evalComment, :sacTriggered, :paymentImpact, :ip, :userAgent)`,
       {
         id: responseId,
         linkId: linkInfo.linkId,
@@ -80,7 +80,9 @@ export class EvaluationResponseService {
         phase: linkInfo.phase,
         score,
         classification,
-        comment: submission.comment ?? null,
+        evalComment: submission.comment ?? null,
+        sacTriggered: 0,
+        paymentImpact: null,
         ip: submission.ip ?? null,
         userAgent: submission.userAgent ?? null,
       },
@@ -190,7 +192,7 @@ export class EvaluationResponseService {
     const offset = (page - 1) * pageSize;
     const [rows, countRow] = await Promise.all([
       queryRows<unknown>(
-        `SELECT ID, NUMPED, PHASE, SCORE, CLASSIFICATION, COMMENT,
+        `SELECT ID, NUMPED, PHASE, SCORE, CLASSIFICATION, EVAL_COMMENT,
                 SAC_TRIGGERED, PAYMENT_IMPACT, CREATED_AT
          FROM MONT_EVAL_RESPONSES
          WHERE PHASE = :phase

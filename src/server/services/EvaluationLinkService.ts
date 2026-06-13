@@ -69,7 +69,7 @@ export class EvaluationLinkService {
         numped: params.numped ?? null,
         codcli: params.codcli ?? null,
         phase: params.phase,
-        expiresAt: expiresAt.toISOString(),
+        expiresAt: expiresAt,
         userId: params.userId ?? null,
       },
     );

@@ -1,7 +1,7 @@
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 
-export type EvalQuestionType = "SCALE" | "STARS" | "TEXT" | "SINGLE_CHOICE";
+export type EvalQuestionType = "SCALE" | "STARS" | "TEXT" | "SINGLE_CHOICE" | "YES_NO";
 
 export type EvalQuestion = {
   id: string;

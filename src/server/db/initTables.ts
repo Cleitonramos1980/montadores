@@ -782,7 +782,7 @@ const TABLES: Array<{ name: string; ddl: string }> = [
       PHASE           VARCHAR2(40) NOT NULL,
       SCORE           NUMBER(5,2),
       CLASSIFICATION  VARCHAR2(40),
-      COMMENT         VARCHAR2(4000),
+      EVAL_COMMENT    VARCHAR2(4000),
       SAC_TRIGGERED   NUMBER(1) DEFAULT 0 NOT NULL,
       SAC_CASE_ID     VARCHAR2(36),
       PAYMENT_IMPACT  VARCHAR2(40),

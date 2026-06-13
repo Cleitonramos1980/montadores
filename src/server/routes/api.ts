@@ -25,7 +25,7 @@ import { ProviderNotificationService } from "../services/ProviderNotificationSer
 import { EvaluationConfigService } from "../services/EvaluationConfigService";
 import { EvaluationLinkService } from "../services/EvaluationLinkService";
 import { EvaluationResponseService } from "../services/EvaluationResponseService";
-import { queryOne } from "../db/db";
+import { queryOne, queryRows } from "../db/db";
 
 export const api = Router();
 
@@ -1717,7 +1717,7 @@ api.get("/eval-configs/:id/questions", evalAdminRoles, asyncRoute(async (req, re
 
 api.post("/eval-configs/:id/questions", evalAdminRoles, asyncRoute(async (req, res) => {
   const body = z.object({
-    type:     z.enum(["SCALE", "STARS", "TEXT", "SINGLE_CHOICE"]).optional(),
+    type:     z.enum(["SCALE", "STARS", "TEXT", "SINGLE_CHOICE", "YES_NO"]).optional(),
     label:    z.string().min(3).max(500),
     required: z.boolean().optional(),
     minLabel: z.string().max(100).optional(),
@@ -1759,5 +1759,103 @@ api.post("/eval-links", evalAdminRoles, asyncRoute(async (req, res) => {
     codcli:         z.string().optional(),
   }).parse(req.body);
   res.status(201).json(await evalLinkSvc.generate({ ...body, userId: req.user!.sub }));
+}));
+
+// ── Analytics por pergunta ─────────────────────────────────────────────────────
+
+api.get("/eval-analytics", evalAdminRoles, asyncRoute(async (req, res) => {
+  const { phase } = z.object({
+    phase: z.enum(["ATENDIMENTO", "ENTREGA", "MONTAGEM"]),
+  }).parse(req.query);
+
+  const totalRow = await queryOne<{ total: number }>(
+    "SELECT COUNT(*) AS TOTAL FROM MONT_EVAL_RESPONSES WHERE PHASE = :phase",
+    { phase },
+  );
+  const totalResponses = Number(totalRow?.total ?? 0);
+
+  if (totalResponses === 0) {
+    return res.json({ phase, totalResponses: 0, questions: [] });
+  }
+
+  // OPTIONS_JSON is CLOB — excluded from all queries (not needed for distribution display)
+  const [distRows, textRows] = await Promise.all([
+    queryRows<{
+      question_id: string; label: string; type: string; position: number;
+      min_label: string | null; max_label: string | null;
+      ans: string | null; cnt: number;
+    }>(
+      `SELECT a.QUESTION_ID,
+              q.LABEL, q.TYPE, q.POSITION, q.MIN_LABEL, q.MAX_LABEL,
+              NVL(a.VALUE_TEXT, TO_CHAR(a.VALUE_NUMBER)) AS ANS,
+              COUNT(*) AS CNT
+       FROM MONT_EVAL_ANSWERS a
+       JOIN MONT_EVAL_QUESTIONS q ON q.ID = a.QUESTION_ID
+       JOIN MONT_EVAL_RESPONSES r ON r.ID = a.RESPONSE_ID
+       WHERE r.PHASE = :phase
+         AND (a.VALUE_TEXT IS NOT NULL OR a.VALUE_NUMBER IS NOT NULL)
+       GROUP BY a.QUESTION_ID, q.LABEL, q.TYPE, q.POSITION, q.MIN_LABEL, q.MAX_LABEL,
+                NVL(a.VALUE_TEXT, TO_CHAR(a.VALUE_NUMBER))
+       ORDER BY q.POSITION, ANS`,
+      { phase },
+    ),
+    queryRows<{ question_id: string; value_text: string }>(
+      `SELECT a.QUESTION_ID, a.VALUE_TEXT
+       FROM MONT_EVAL_ANSWERS a
+       JOIN MONT_EVAL_RESPONSES r ON r.ID = a.RESPONSE_ID
+       JOIN MONT_EVAL_QUESTIONS q ON q.ID = a.QUESTION_ID
+       WHERE r.PHASE = :phase AND q.TYPE = 'TEXT' AND a.VALUE_TEXT IS NOT NULL
+       ORDER BY r.CREATED_AT DESC
+       FETCH FIRST 30 ROWS ONLY`,
+      { phase },
+    ),
+  ]);
+
+  type QStat = {
+    questionId: string; label: string; type: string; position: number;
+    minLabel: string | null; maxLabel: string | null;
+    totalAnswered: number;
+    distribution: { value: string; count: number; pct: number }[];
+    textSamples?: string[];
+  };
+
+  const map = new Map<string, QStat>();
+  for (const row of distRows) {
+    if (!map.has(row.question_id)) {
+      map.set(row.question_id, {
+        questionId: row.question_id,
+        label: row.label,
+        type: row.type,
+        position: row.position,
+        minLabel: row.min_label,
+        maxLabel: row.max_label,
+        totalAnswered: 0,
+        distribution: [],
+      });
+    }
+    const q = map.get(row.question_id)!;
+    const cnt = Number(row.cnt);
+    q.totalAnswered += cnt;
+    q.distribution.push({ value: row.ans ?? "", count: cnt, pct: 0 });
+  }
+
+  for (const q of map.values()) {
+    for (const d of q.distribution) {
+      d.pct = q.totalAnswered > 0 ? Math.round((d.count / q.totalAnswered) * 100) : 0;
+    }
+  }
+
+  const textByQ = new Map<string, string[]>();
+  for (const t of textRows) {
+    if (!textByQ.has(t.question_id)) textByQ.set(t.question_id, []);
+    textByQ.get(t.question_id)!.push(t.value_text);
+  }
+  for (const [qid, samples] of textByQ) {
+    const q = map.get(qid);
+    if (q) q.textSamples = samples;
+  }
+
+  const questions = [...map.values()].sort((a, b) => a.position - b.position);
+  res.json({ phase, totalResponses, questions });
 }));
 

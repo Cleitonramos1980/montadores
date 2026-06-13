@@ -25,9 +25,12 @@ export class ReviewService {
   ) {}
 
   async list() {
-    const [reviews, summary, phaseStats, sentCounts] = await Promise.all([
+    const [reviews, evalResponses, summary, phaseStats, evalPhaseStats, sentCounts, evalLinkCounts] = await Promise.all([
+      // Old system reviews
       queryRows(
-        `SELECT r.*, o.NUMPED, c.NAME AS CUSTOMER_NAME, p.NAME AS PROVIDER_NAME
+        `SELECT r.ID, r.SERVICE_TYPE, r.SCORE, r.CLASSIFICATION,
+                r.REVIEW_COMMENT, r.COMPLAINT_REASON, r.CREATED_AT,
+                o.NUMPED, c.NAME AS CUSTOMER_NAME, p.NAME AS PROVIDER_NAME
          FROM MONT_CUSTOMER_REVIEWS r
          JOIN MONT_ORDERS o ON o.ID = r.ORDER_ID
          JOIN MONT_CUSTOMERS c ON c.ID = o.CUSTOMER_ID
@@ -35,30 +38,61 @@ export class ReviewService {
          LEFT JOIN MONT_PROVIDERS p ON p.ID = a.PROVIDER_ID
          ORDER BY r.CREATED_AT DESC`,
       ),
+      // New eval-link system responses
+      queryRows(
+        `SELECT ID, PHASE AS SERVICE_TYPE, SCORE, CLASSIFICATION,
+                EVAL_COMMENT AS REVIEW_COMMENT, NULL AS COMPLAINT_REASON,
+                NUMPED, CREATED_AT,
+                NULL AS CUSTOMER_NAME, NULL AS PROVIDER_NAME
+         FROM MONT_EVAL_RESPONSES
+         ORDER BY CREATED_AT DESC`,
+      ),
+      // Summary merged from both tables
       queryOne<{ total: number; positive: number; neutral: number; negative: number; averageScore: number }>(
         `SELECT
            COUNT(*) AS TOTAL,
            SUM(CASE WHEN CLASSIFICATION = 'POSITIVA' THEN 1 ELSE 0 END) AS POSITIVE,
-           SUM(CASE WHEN CLASSIFICATION = 'NEUTRA' THEN 1 ELSE 0 END) AS NEUTRAL,
+           SUM(CASE WHEN CLASSIFICATION = 'NEUTRA'   THEN 1 ELSE 0 END) AS NEUTRAL,
            SUM(CASE WHEN CLASSIFICATION = 'NEGATIVA' THEN 1 ELSE 0 END) AS NEGATIVE,
            ROUND(AVG(SCORE), 2) AS "averageScore"
-         FROM MONT_CUSTOMER_REVIEWS`,
+         FROM (
+           SELECT CLASSIFICATION, SCORE FROM MONT_CUSTOMER_REVIEWS
+           UNION ALL
+           SELECT CLASSIFICATION, SCORE FROM MONT_EVAL_RESPONSES
+         )`,
       ),
+      // Phase stats from old system
       queryRows(
         `SELECT SERVICE_TYPE,
                 COUNT(*) AS RECEIVED,
                 ROUND(AVG(SCORE), 2) AS AVG_SCORE,
                 SUM(CASE WHEN CLASSIFICATION = 'POSITIVA' THEN 1 ELSE 0 END) AS POSITIVE,
-                SUM(CASE WHEN CLASSIFICATION = 'NEUTRA' THEN 1 ELSE 0 END) AS NEUTRAL,
+                SUM(CASE WHEN CLASSIFICATION = 'NEUTRA'   THEN 1 ELSE 0 END) AS NEUTRAL,
                 SUM(CASE WHEN CLASSIFICATION = 'NEGATIVA' THEN 1 ELSE 0 END) AS NEGATIVE
          FROM MONT_CUSTOMER_REVIEWS
          GROUP BY SERVICE_TYPE`,
       ),
+      // Phase stats from new eval system
+      queryRows(
+        `SELECT PHASE AS SERVICE_TYPE,
+                COUNT(*) AS RECEIVED,
+                ROUND(AVG(SCORE), 2) AS AVG_SCORE,
+                SUM(CASE WHEN CLASSIFICATION = 'POSITIVA' THEN 1 ELSE 0 END) AS POSITIVE,
+                SUM(CASE WHEN CLASSIFICATION = 'NEUTRA'   THEN 1 ELSE 0 END) AS NEUTRAL,
+                SUM(CASE WHEN CLASSIFICATION = 'NEGATIVA' THEN 1 ELSE 0 END) AS NEGATIVE
+         FROM MONT_EVAL_RESPONSES
+         GROUP BY PHASE`,
+      ),
+      // Sent counts from old event system
       queryRows(
         `SELECT TYPE AS EVENT_TYPE, COUNT(DISTINCT NUMPED) AS TOTAL
          FROM MONT_ORDER_EVENTS
          WHERE TYPE IN ('ATENDIMENTO_AVALIACAO_ENVIADA', 'ENTREGA_REALIZADA', 'LINK_AVALIACAO_MONTAGEM_ENVIADO')
          GROUP BY TYPE`,
+      ),
+      // Sent counts from new eval-link system
+      queryRows(
+        `SELECT PHASE, COUNT(*) AS TOTAL FROM MONT_EVAL_LINKS GROUP BY PHASE`,
       ),
     ]);
 
@@ -86,18 +120,29 @@ export class ReviewService {
       // WinThor unavailable — leave as 0
     }
 
+    // Merge helper: sum old + new eval stats per phase
     const byType = (type: string) => {
-      const row = phaseStats.find((r: any) => r.service_type === type) as any;
-      return {
-        received: Number(row?.received ?? 0),
-        avgScore: Number(row?.avg_score ?? 0),
-        positive: Number(row?.positive ?? 0),
-        neutral:  Number(row?.neutral  ?? 0),
-        negative: Number(row?.negative ?? 0),
-      };
+      const old  = phaseStats.find((r: any)     => r.service_type === type) as any;
+      const newE = evalPhaseStats.find((r: any) => r.service_type === type) as any;
+      const received = Number(old?.received ?? 0) + Number(newE?.received ?? 0);
+      const positive = Number(old?.positive ?? 0) + Number(newE?.positive ?? 0);
+      const neutral  = Number(old?.neutral  ?? 0) + Number(newE?.neutral  ?? 0);
+      const negative = Number(old?.negative ?? 0) + Number(newE?.negative ?? 0);
+      // Weighted average of scores
+      const oldAvg = Number(old?.avg_score  ?? 0);
+      const newAvg = Number(newE?.avg_score ?? 0);
+      const oldCnt = Number(old?.received   ?? 0);
+      const newCnt = Number(newE?.received  ?? 0);
+      const avgScore = received > 0
+        ? Math.round(((oldAvg * oldCnt + newAvg * newCnt) / received) * 100) / 100
+        : 0;
+      return { received, avgScore, positive, neutral, negative };
     };
+
     const sentByEvent = (evt: string) =>
       Number((sentCounts.find((r: any) => r.event_type === evt) as any)?.total ?? 0);
+    const evalSentByPhase = (phase: string) =>
+      Number((evalLinkCounts.find((r: any) => r.phase === phase) as any)?.total ?? 0);
 
     const phases = [
       {
@@ -105,7 +150,7 @@ export class ReviewService {
         label: "Atendimento",
         description: "Pedido faturado no WinThor (CONDVENDA=7)",
         triggerLabel: "POSICAO=F · CONDVENDA=7",
-        sent: sentByEvent("ATENDIMENTO_AVALIACAO_ENVIADA"),
+        sent: sentByEvent("ATENDIMENTO_AVALIACAO_ENVIADA") + evalSentByPhase("ATENDIMENTO"),
         faturados: atendimentoFaturados,
         pendentes: atendimentoPendentes,
         ...byType("ATENDIMENTO"),
@@ -115,7 +160,7 @@ export class ReviewService {
         label: "Entrega",
         description: "Pedido entregue",
         triggerLabel: "ENTREGA REALIZADA",
-        sent: sentByEvent("ENTREGA_REALIZADA"),
+        sent: sentByEvent("ENTREGA_REALIZADA") + evalSentByPhase("ENTREGA"),
         faturados: 0,
         pendentes: 0,
         ...byType("ENTREGA"),
@@ -125,14 +170,18 @@ export class ReviewService {
         label: "Montagem",
         description: "Montador executa serviço",
         triggerLabel: "LINK AVALIAÇÃO MONTAGEM ENVIADO",
-        sent: sentByEvent("LINK_AVALIACAO_MONTAGEM_ENVIADO"),
+        sent: sentByEvent("LINK_AVALIACAO_MONTAGEM_ENVIADO") + evalSentByPhase("MONTAGEM"),
         faturados: 0,
         pendentes: 0,
         ...byType("MONTAGEM"),
       },
     ];
 
-    return { summary, reviews, phases };
+    // Merge reviews from both systems, sorted by date desc
+    const allReviews = [...(reviews as any[]), ...(evalResponses as any[])]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    return { summary, reviews: allReviews, phases };
   }
 
   async listAtendimentoPendentes(page = 1, pageSize = 20): Promise<{ rows: AtendimentoPendente[]; total: number }> {
