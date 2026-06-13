@@ -19,6 +19,24 @@ if (isProduction && !corsOrigins) {
   throw new Error("[FATAL] CORS_ORIGINS não configurado em produção. Defina CORS_ORIGINS para restringir as origens permitidas.");
 }
 
+// ── Feature flags ────────────────────────────────────────────────────────────
+// Permitem ativar/desativar funcionalidades novas sem impactar produção.
+// Em dúvida, deixe false e ative apenas em homologação primeiro.
+const flag = (key: string, defaultVal = false): boolean => {
+  const v = process.env[key];
+  if (v === undefined) return defaultVal;
+  return v === "1" || v.toLowerCase() === "true";
+};
+
+export const features = {
+  deptCommissionRules: flag("ENABLE_DEPARTMENT_COMMISSION_RULES", false),
+  geoMatching:         flag("ENABLE_GEO_MATCHING", false),
+  pixPayments:         flag("ENABLE_PIX_PAYMENTS", false),
+  pwaOffline:          flag("ENABLE_PWA_OFFLINE", true),
+  reworkScoreImpact:   flag("ENABLE_REWORK_SCORE_IMPACT", false),
+  strictRbac:          flag("ENABLE_STRICT_RBAC", true),
+};
+
 export const config = {
   isProduction,
   port: Number(process.env.PORT ?? 3333),

@@ -1,6 +1,8 @@
 import { queryRows } from "../db/db";
 import { isOracleEnabled } from "../db/oracle";
+import { features } from "../config";
 import { WinthorPedidoItemRepository } from "../oracle/WinthorPedidoItemRepository";
+import { EventService } from "./EventService";
 
 export type EligibleProduct = {
   codprod: string;
@@ -52,6 +54,7 @@ type ProdutRow = {
 export class AssemblyEligibilityService {
   constructor(
     private readonly itemRepo = new WinthorPedidoItemRepository(),
+    private readonly events = new EventService(),
   ) {}
 
   async checkEligibility(numped: string): Promise<EligibilityResult> {
@@ -102,7 +105,7 @@ export class AssemblyEligibilityService {
       const codprod  = String(item.codprod);
       const codepto  = produtMap.get(codprod) ?? "";
       const prodRule = productRuleMap.get(codprod);
-      const deptRule = codepto ? deptRuleMap.get(codepto) : undefined;
+      const deptRule = (features.deptCommissionRules && codepto) ? deptRuleMap.get(codepto) : undefined;
       const rule     = prodRule ?? deptRule;
 
       if (!rule) {
@@ -134,7 +137,7 @@ export class AssemblyEligibilityService {
       });
     }
 
-    return {
+    const result: EligibilityResult = {
       numped,
       eligible: eligibleProducts.length > 0,
       eligibleProducts,
@@ -142,5 +145,21 @@ export class AssemblyEligibilityService {
       totalEstimatedCommission,
       dataSource: "winthor_pcpedi",
     };
+
+    await this.events.emit({
+      type: "ORDER_ELIGIBILITY_CHECKED",
+      numped,
+      origin: "SISTEMA",
+      metadata: {
+        eligible: result.eligible,
+        eligibleCount: eligibleProducts.length,
+        ineligibleCount: ineligibleProducts.length,
+        totalEstimatedCommission,
+        dataSource: result.dataSource,
+      },
+      idempotencyKey: `eligibility:${numped}:${Date.now()}`,
+    }).catch(() => {}); // observability — não bloqueia fluxo principal
+
+    return result;
   }
 }

@@ -641,6 +641,63 @@ const TABLES: Array<{ name: string; ddl: string }> = [
       CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
     )`,
   },
+  // ── PIX — Contas de pagamento do montador ────────────────────────────────────
+  {
+    name: "MONT_PROVIDER_PAYMENT_ACCOUNTS",
+    ddl: `CREATE TABLE MONT_PROVIDER_PAYMENT_ACCOUNTS (
+      ID              VARCHAR2(36) PRIMARY KEY,
+      PROVIDER_ID     VARCHAR2(36) NOT NULL,
+      PIX_KEY_TYPE    VARCHAR2(40)  NOT NULL,
+      PIX_KEY         VARCHAR2(255) NOT NULL,
+      HOLDER_NAME     VARCHAR2(255) NOT NULL,
+      HOLDER_DOCUMENT VARCHAR2(30),
+      STATUS          VARCHAR2(20) DEFAULT 'PENDENTE' NOT NULL,
+      VALIDATED_AT    TIMESTAMP,
+      VALIDATED_BY    VARCHAR2(36),
+      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      UPDATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONSTRAINT UQ_MONT_PPA_PROV UNIQUE (PROVIDER_ID)
+    )`,
+  },
+  // ── PIX — Solicitações de pagamento ──────────────────────────────────────────
+  {
+    name: "MONT_PIX_PAYMENT_REQUESTS",
+    ddl: `CREATE TABLE MONT_PIX_PAYMENT_REQUESTS (
+      ID                  VARCHAR2(36) PRIMARY KEY,
+      PROVIDER_PAYMENT_ID VARCHAR2(36) NOT NULL,
+      PROVIDER_ID         VARCHAR2(36) NOT NULL,
+      AMOUNT              NUMBER(14,2) NOT NULL,
+      PIX_KEY             VARCHAR2(255) NOT NULL,
+      PSP_PROVIDER        VARCHAR2(50)  DEFAULT 'DISABLED' NOT NULL,
+      STATUS              VARCHAR2(30)  DEFAULT 'PENDENTE' NOT NULL,
+      IDEMPOTENCY_KEY     VARCHAR2(100) NOT NULL,
+      EXTERNAL_PAYMENT_ID VARCHAR2(200),
+      END_TO_END_ID       VARCHAR2(200),
+      REQUEST_PAYLOAD     CLOB,
+      RESPONSE_PAYLOAD    CLOB,
+      ERROR_MESSAGE       VARCHAR2(2000),
+      REQUESTED_BY        VARCHAR2(36),
+      REQUESTED_AT        TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONFIRMED_AT        TIMESTAMP,
+      CREATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      UPDATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONSTRAINT UQ_MONT_PIX_IDEMPOTENCY UNIQUE (IDEMPOTENCY_KEY)
+    )`,
+  },
+  // ── PIX — Webhooks do PSP ──────────────────────────────────────────────────
+  {
+    name: "MONT_PIX_PAYMENT_WEBHOOKS",
+    ddl: `CREATE TABLE MONT_PIX_PAYMENT_WEBHOOKS (
+      ID                  VARCHAR2(36) PRIMARY KEY,
+      PSP_PROVIDER        VARCHAR2(50) NOT NULL,
+      EXTERNAL_PAYMENT_ID VARCHAR2(200),
+      EVENT_TYPE          VARCHAR2(80) NOT NULL,
+      PAYLOAD             CLOB NOT NULL,
+      PROCESSED           NUMBER(1) DEFAULT 0 NOT NULL,
+      PROCESSED_AT        TIMESTAMP,
+      CREATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
 ];
 
 const NEW_COLUMNS: ColumnDef[] = [
@@ -671,6 +728,31 @@ const NEW_COLUMNS: ColumnDef[] = [
   // CEP para matching geográfico
   { table: "MONT_PROVIDERS", column: "CEP", ddl: "VARCHAR2(10)" },
   { table: "MONT_PROVIDERS", column: "TRADE_NAME", ddl: "VARCHAR2(255)" },
+  // Geo matching — coordenadas e raio de atuação
+  { table: "MONT_PROVIDERS", column: "LATITUDE",  ddl: "NUMBER(10,7)" },
+  { table: "MONT_PROVIDERS", column: "LONGITUDE", ddl: "NUMBER(10,7)" },
+  { table: "MONT_PROVIDERS", column: "RADIUS_KM", ddl: "NUMBER(7,2) DEFAULT 30" },
+  // MONT_ASSEMBLY_JOB_ITEMS — campos financeiros adicionais
+  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_UNITARIO",  ddl: "NUMBER(14,4)" },
+  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_TOTAL_ITEM", ddl: "NUMBER(14,4)" },
+  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UPDATED_AT", ddl: "TIMESTAMP DEFAULT SYSTIMESTAMP" },
+  // MONT_ASSEMBLY_REWORKS — campos completos de rastreabilidade
+  { table: "MONT_ASSEMBLY_REWORKS", column: "ORIGINAL_PROVIDER_ID", ddl: "VARCHAR2(36)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "NEW_PROVIDER_ID",      ddl: "VARCHAR2(36)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "NUMPED",               ddl: "VARCHAR2(50)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "CODCLI",               ddl: "VARCHAR2(50)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "SAC_CASE_ID",          ddl: "VARCHAR2(36)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "CLASSIFICATION",       ddl: "VARCHAR2(50)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "SEVERITY",             ddl: "VARCHAR2(20) DEFAULT 'MEDIA'" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "REQUIRES_RETURN",      ddl: "NUMBER(1) DEFAULT 0" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "AFFECTS_PROVIDER_SCORE", ddl: "NUMBER(1) DEFAULT 0" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "AFFECTS_PAYMENT",      ddl: "NUMBER(1) DEFAULT 0" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "PROCEDENTE",           ddl: "NUMBER(1)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "CUSTOMER_COMMENT",     ddl: "VARCHAR2(2000)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "SAC_COMMENT",          ddl: "VARCHAR2(2000)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "CREATED_BY",           ddl: "VARCHAR2(36)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "APPROVED_BY",          ddl: "VARCHAR2(36)" },
+  { table: "MONT_ASSEMBLY_REWORKS", column: "UPDATED_AT",           ddl: "TIMESTAMP DEFAULT SYSTIMESTAMP" },
 ];
 const INDEXES: IndexDef[] = [
   { name: "IDX_MONT_ORDERS_STATUS", table: "MONT_ORDERS", columns: "CURRENT_STATUS" },
@@ -705,6 +787,13 @@ const INDEXES: IndexDef[] = [
   { name: "IDX_MONT_REWORK_JOB",        table: "MONT_ASSEMBLY_REWORKS", columns: "ASSEMBLY_JOB_ID" },
   { name: "IDX_MONT_REWORK_PROV",       table: "MONT_ASSEMBLY_REWORKS", columns: "PROVIDER_ID" },
   { name: "IDX_MONT_UFILIAIS_USER",     table: "MONT_USER_FILIAIS", columns: "USER_ID" },
+  // PIX indexes
+  { name: "IDX_MONT_PIX_PMT_PROV",     table: "MONT_PIX_PAYMENT_REQUESTS", columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_PIX_PMT_PPMT",     table: "MONT_PIX_PAYMENT_REQUESTS", columns: "PROVIDER_PAYMENT_ID" },
+  { name: "IDX_MONT_PIX_WH_EXTID",     table: "MONT_PIX_PAYMENT_WEBHOOKS", columns: "EXTERNAL_PAYMENT_ID" },
+  { name: "IDX_MONT_PPA_PROV",         table: "MONT_PROVIDER_PAYMENT_ACCOUNTS", columns: "PROVIDER_ID" },
+  // Assembly job items
+  { name: "IDX_MONT_AJI_CODPROD",      table: "MONT_ASSEMBLY_JOB_ITEMS", columns: "CODPROD" },
 ];
 
 async function tableExists(tableName: string): Promise<boolean> {
@@ -856,8 +945,10 @@ const FK_CONSTRAINTS: Array<{ name: string; table: string; column: string; refTa
   { name: "FK_MONT_ORD_CUST",  table: "MONT_ORDERS",                column: "CUSTOMER_ID",     refTable: "MONT_CUSTOMERS",          refColumn: "ID" },
   { name: "FK_MONT_AJI_JOB",   table: "MONT_ASSEMBLY_JOB_ITEMS",   column: "ASSEMBLY_JOB_ID", refTable: "MONT_ASSEMBLY_JOBS",      refColumn: "ID" },
   { name: "FK_MONT_PAYM_JOB",  table: "MONT_PROVIDER_PAYMENTS",     column: "ASSEMBLY_JOB_ID", refTable: "MONT_ASSEMBLY_JOBS",      refColumn: "ID" },
-  { name: "FK_MONT_CALCI_PMT", table: "MONT_COMMISSION_CALC_ITEMS", column: "PAYMENT_ID",      refTable: "MONT_PROVIDER_PAYMENTS",  refColumn: "ID" },
-  { name: "FK_MONT_PRT_USER",  table: "MONT_PASSWORD_RESET_TOKENS", column: "USER_ID",         refTable: "MONT_USERS",              refColumn: "ID" },
+  { name: "FK_MONT_CALCI_PMT", table: "MONT_COMMISSION_CALC_ITEMS",      column: "PAYMENT_ID",           refTable: "MONT_PROVIDER_PAYMENTS",      refColumn: "ID" },
+  { name: "FK_MONT_PRT_USER",  table: "MONT_PASSWORD_RESET_TOKENS",     column: "USER_ID",              refTable: "MONT_USERS",                  refColumn: "ID" },
+  { name: "FK_MONT_PIX_PMT",   table: "MONT_PIX_PAYMENT_REQUESTS",      column: "PROVIDER_PAYMENT_ID",  refTable: "MONT_PROVIDER_PAYMENTS",      refColumn: "ID" },
+  { name: "FK_MONT_PPA_PROV",  table: "MONT_PROVIDER_PAYMENT_ACCOUNTS", column: "PROVIDER_ID",          refTable: "MONT_PROVIDERS",              refColumn: "ID" },
 ];
 
 export async function ensureMontadoresTables(): Promise<void> {

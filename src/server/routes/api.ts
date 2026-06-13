@@ -1038,6 +1038,17 @@ api.get("/agenda/stats", agendaRoles, asyncRoute(async (_req, res) => {
   res.json(await agendaEntrega.getSummaryStats());
 }));
 
+// Matching geográfico de montadores para um pedido/cliente
+api.get("/agenda/providers-match", agendaRoles, asyncRoute(async (req, res) => {
+  const { ProviderMatchingService } = await import("../services/ProviderMatchingService");
+  const svc = new ProviderMatchingService();
+  const clientLat = req.query.lat ? Number(req.query.lat) : undefined;
+  const clientLon = req.query.lon ? Number(req.query.lon) : undefined;
+  const clientCity = req.query.city ? String(req.query.city) : undefined;
+  const clientUf   = req.query.uf   ? String(req.query.uf)   : undefined;
+  res.json(await svc.match({ clientLat, clientLon, clientCity, clientUf }));
+}));
+
 api.post("/agenda/candidatos/:numped/montagem-agendada", agendaRoles, asyncRoute(async (req, res) => {
   const numped = param(req.params.numped);
   await agendaEntrega.marcarMontagemAgendada(numped, new Date());
@@ -1223,6 +1234,141 @@ api.get("/providers/:id/reworks", asyncRoute(async (req, res) => {
   ));
 }));
 
+// ── Reworks completo (CRUD + classificação) ────────────────────────────────────
+const sacRoles = requireRole("ADMIN", "GESTOR", "SAC", "OPERACAO");
+
+api.get("/reworks", sacRoles, asyncRoute(async (req, res) => {
+  const { queryRows: qr } = await import("../db/db");
+  const rows = await qr(
+    `SELECT r.*, p.NAME AS PROVIDER_NAME, o.NUMPED AS ORDER_NUMPED
+     FROM MONT_ASSEMBLY_REWORKS r
+     LEFT JOIN MONT_PROVIDERS p ON p.ID = r.PROVIDER_ID
+     LEFT JOIN MONT_ASSEMBLY_JOBS j ON j.ID = r.ASSEMBLY_JOB_ID
+     LEFT JOIN MONT_ORDERS o ON o.ID = j.ORDER_ID
+     ORDER BY r.CREATED_AT DESC
+     FETCH FIRST 200 ROWS ONLY`,
+  );
+  res.json(rows);
+}));
+
+api.get("/reworks/:id", sacRoles, asyncRoute(async (req, res) => {
+  const { queryOne: qo } = await import("../db/db");
+  const row = await qo(
+    `SELECT r.*, p.NAME AS PROVIDER_NAME, o.NUMPED AS ORDER_NUMPED,
+            s.REASON AS SAC_REASON, s.STATUS AS SAC_STATUS
+     FROM MONT_ASSEMBLY_REWORKS r
+     LEFT JOIN MONT_PROVIDERS p ON p.ID = r.PROVIDER_ID
+     LEFT JOIN MONT_ASSEMBLY_JOBS j ON j.ID = r.ASSEMBLY_JOB_ID
+     LEFT JOIN MONT_ORDERS o ON o.ID = j.ORDER_ID
+     LEFT JOIN MONT_SAC_CASES s ON s.ID = r.SAC_CASE_ID
+     WHERE r.ID = :id`,
+    { id: param(req.params.id) },
+  );
+  if (!row) throw new Error("Retrabalho não encontrado.");
+  res.json(row);
+}));
+
+api.post("/reworks", sacRoles, asyncRoute(async (req, res) => {
+  const { execDml: dml, queryOne: qo } = await import("../db/db");
+  const { v4: uuidv4 } = await import("uuid");
+  const { EventService: EvSvc } = await import("../services/EventService");
+  const body = z.object({
+    assemblyJobId:        z.string().uuid(),
+    reason:               z.string().min(5),
+    description:          z.string().optional(),
+    classification:       z.enum(["MONTAGEM_MAL_FEITA","MONTAGEM_INCOMPLETA","FALTA_DE_FOTO","DANO_AVARIA","CLIENTE_NAO_APROVOU","PRODUTO_INCORRETO","OUTROS"]),
+    severity:             z.enum(["BAIXA","MEDIA","ALTA","CRITICA"]).default("MEDIA"),
+    sacCaseId:            z.string().optional(),
+    requiresReturn:       z.boolean().default(false),
+    customerComment:      z.string().optional(),
+  }).parse(req.body);
+
+  const job = await qo<{ id: string; provider_id: string; order_id: string }>(
+    "SELECT ID, PROVIDER_ID, ORDER_ID FROM MONT_ASSEMBLY_JOBS WHERE ID = :id",
+    { id: body.assemblyJobId },
+  );
+  if (!job) throw new Error("Montagem não encontrada.");
+
+  const order = await qo<{ numped: string; codcli: string }>(
+    "SELECT NUMPED, CODCLI FROM MONT_ORDERS WHERE ID = :id",
+    { id: job.order_id },
+  );
+
+  const id = uuidv4();
+  await dml(
+    `INSERT INTO MONT_ASSEMBLY_REWORKS
+       (ID, ASSEMBLY_JOB_ID, PROVIDER_ID, ORIGINAL_PROVIDER_ID, SAC_CASE_ID, REASON, DESCRIPTION,
+        CLASSIFICATION, SEVERITY, STATUS, REQUIRES_RETURN, NUMPED, CODCLI, CUSTOMER_COMMENT, CREATED_BY)
+     VALUES
+       (:id, :jobId, :provId, :origProv, :sacId, :reason, :desc,
+        :cls, :sev, 'ABERTO', :reqRet, :numped, :codcli, :custCmt, :createdBy)`,
+    {
+      id, jobId: body.assemblyJobId, provId: job.provider_id, origProv: job.provider_id,
+      sacId: body.sacCaseId ?? null, reason: body.reason, desc: body.description ?? null,
+      cls: body.classification, sev: body.severity, reqRet: body.requiresReturn ? 1 : 0,
+      numped: order?.numped ?? null, codcli: order?.codcli ?? null,
+      custCmt: body.customerComment ?? null, createdBy: req.user!.sub,
+    },
+  );
+
+  const evSvc = new EvSvc();
+  await evSvc.emit({
+    type: "REWORK_CREATED",
+    orderId: job.order_id ?? "",
+    numped: order?.numped ?? "",
+    codcli: order?.codcli ?? "",
+    origin: "SAC",
+    metadata: { description: `Retrabalho criado: ${body.reason}. Classificação: ${body.classification}.`, reworkId: id },
+    idempotencyKey: `rework-created:${id}`,
+  });
+
+  res.status(201).json({ id });
+}));
+
+api.patch("/reworks/:id", sacRoles, asyncRoute(async (req, res) => {
+  const { execDml: dml, queryOne: qo } = await import("../db/db");
+  const { features: ff } = await import("../config");
+  const body = z.object({
+    status:              z.enum(["ABERTO","EM_ANALISE","AGUARDANDO_RETORNO","REAGENDADO","EM_EXECUCAO","CORRIGIDO","CANCELADO","ENCERRADO"]).optional(),
+    procedente:          z.boolean().optional(),
+    affectsProviderScore:z.boolean().optional(),
+    affectsPayment:      z.boolean().optional(),
+    sacComment:          z.string().optional(),
+    approvedBy:          z.string().optional(),
+  }).parse(req.body);
+
+  const rework = await qo<{ id: string; provider_id: string }>(
+    "SELECT ID, PROVIDER_ID FROM MONT_ASSEMBLY_REWORKS WHERE ID = :id",
+    { id: param(req.params.id) },
+  );
+  if (!rework) throw new Error("Retrabalho não encontrado.");
+
+  const sets: string[] = ["UPDATED_AT = SYSTIMESTAMP"];
+  const binds: Record<string, unknown> = { id: param(req.params.id) };
+
+  if (body.status !== undefined) {
+    sets.push("STATUS = :status");
+    binds.status = body.status;
+    if (body.status === "ENCERRADO" || body.status === "CORRIGIDO") {
+      sets.push("RESOLVED_AT = SYSTIMESTAMP", "RESOLVED_BY = :resolvedBy");
+      binds.resolvedBy = req.user!.sub;
+    }
+  }
+  if (body.procedente !== undefined) { sets.push("PROCEDENTE = :proc"); binds.proc = body.procedente ? 1 : 0; }
+  if (body.affectsProviderScore !== undefined && ff.reworkScoreImpact) {
+    sets.push("AFFECTS_PROVIDER_SCORE = :aps"); binds.aps = body.affectsProviderScore ? 1 : 0;
+  }
+  if (body.affectsPayment !== undefined) { sets.push("AFFECTS_PAYMENT = :ap"); binds.ap = body.affectsPayment ? 1 : 0; }
+  if (body.sacComment !== undefined) { sets.push("SAC_COMMENT = :sacCmt"); binds.sacCmt = body.sacComment; }
+  if (body.approvedBy !== undefined) { sets.push("APPROVED_BY = :apprBy"); binds.apprBy = body.approvedBy; }
+
+  await dml(
+    `UPDATE MONT_ASSEMBLY_REWORKS SET ${sets.join(", ")} WHERE ID = :id`,
+    binds,
+  );
+  res.json({ ok: true });
+}));
+
 // ── Bulk payment actions ──────────────────────────────────────────────────────
 api.post("/payments/bulk-release", financeiroRoles, asyncRoute(async (req, res) => {
   const body = z.object({
@@ -1252,6 +1398,54 @@ api.post("/payments/bulk-program", financeiroRoles, asyncRoute(async (req, res) 
     .map((r, i) => r.status === "rejected" ? { id: body.ids[i], error: (r as PromiseRejectedResult).reason?.message ?? "Erro" } : null)
     .filter(Boolean);
   res.json({ succeeded, failed, total: body.ids.length });
+}));
+
+// ── PIX Payment routes ────────────────────────────────────────────────────────
+
+api.get("/pix/mode", financeiroRoles, asyncRoute(async (_req, res) => {
+  const { PixPaymentService } = await import("../services/PixPaymentService");
+  const svc = new PixPaymentService();
+  res.json({ mode: svc.getMode() });
+}));
+
+api.post("/payments/:id/pix", financeiroRoles, asyncRoute(async (req, res) => {
+  const { PixPaymentService } = await import("../services/PixPaymentService");
+  const svc = new PixPaymentService();
+  const result = await svc.requestPayment(param(req.params.id), req.user!.sub);
+  res.status(201).json(result);
+}));
+
+api.get("/providers/:id/pix-account", financeiroRoles, asyncRoute(async (req, res) => {
+  const { PixPaymentService } = await import("../services/PixPaymentService");
+  const svc = new PixPaymentService();
+  const account = await svc.getProviderAccount(param(req.params.id));
+  res.json(account ?? null);
+}));
+
+api.put("/providers/:id/pix-account", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
+  const { PixPaymentService } = await import("../services/PixPaymentService");
+  const svc = new PixPaymentService();
+  const body = z.object({
+    pixKeyType: z.enum(["CPF", "CNPJ", "EMAIL", "TELEFONE", "CHAVE_ALEATORIA"]),
+    pixKey:     z.string().min(3).max(255),
+    holderName: z.string().min(2),
+    holderDocument: z.string().optional(),
+  }).parse(req.body);
+  await svc.upsertProviderAccount(param(req.params.id), body);
+  res.json({ ok: true });
+}));
+
+api.post("/providers/:id/pix-account/validate", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
+  const { PixPaymentService } = await import("../services/PixPaymentService");
+  const { queryOne: qo } = await import("../db/db");
+  const svc = new PixPaymentService();
+  const account = await qo<{ id: string }>(
+    "SELECT ID FROM MONT_PROVIDER_PAYMENT_ACCOUNTS WHERE PROVIDER_ID = :pid",
+    { pid: param(req.params.id) },
+  );
+  if (!account) throw new Error("Conta PIX não encontrada.");
+  await svc.validateAccount(account.id, req.user!.sub);
+  res.json({ ok: true });
 }));
 
 // ── Provider dashboard summary (App Montador) ─────────────────────────────────

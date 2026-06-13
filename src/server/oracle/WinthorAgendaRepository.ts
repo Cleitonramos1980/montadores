@@ -1,4 +1,5 @@
 import { queryRows, queryOne } from "../db/db";
+import { features } from "../config";
 
 export type AgendaCandidatoRow = {
   order_id: string | null;
@@ -50,9 +51,16 @@ export class WinthorAgendaRepository {
     if (somenteEntregues) { extras.push("AND CAR.DTFECHA IS NOT NULL"); }
 
     // Filtra pedidos que têm ao menos um produto elegível para montagem.
-    // Elegível = produto com regra em MONT_PRODUCT_COMMISSIONS (por CODPROD)
-    //         OU produto cujo departamento está em MONT_DEPT_COMMISSIONS (por PCPRODUT.CODEPTO).
+    // Com ENABLE_DEPARTMENT_COMMISSION_RULES=false (padrão): somente produto individual.
+    // Com flag true: produto OU departamento.
     if (somenteElegiveis) {
+      const deptClause = features.deptCommissionRules
+        ? `OR EXISTS (
+              SELECT 1 FROM MONT_DEPT_COMMISSIONS MDC
+              WHERE TO_CHAR(MDC.CODEPTO) = TO_CHAR(PR.CODEPTO)
+                AND MDC.ACTIVE = 1
+            )`
+        : "";
       extras.push(`AND EXISTS (
         SELECT 1
         FROM PCPEDI I
@@ -65,11 +73,7 @@ export class WinthorAgendaRepository {
               WHERE TO_CHAR(MPC.CODPROD) = TO_CHAR(I.CODPROD)
                 AND MPC.ACTIVE = 1
             )
-            OR EXISTS (
-              SELECT 1 FROM MONT_DEPT_COMMISSIONS MDC
-              WHERE TO_CHAR(MDC.CODEPTO) = TO_CHAR(PR.CODEPTO)
-                AND MDC.ACTIVE = 1
-            )
+            ${deptClause}
           )
       )`);
     }

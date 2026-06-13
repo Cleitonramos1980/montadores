@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActionButton, LoadingState, Page, StatusBadge, useToast } from "../components/Ui";
 import { api, getToken } from "../lib/api";
+import { forceSync, getQueueStatus, isOnline, onSyncCompleted, type QueueStatus } from "../lib/offlineQueue";
 
 const STEPS = ["Agendada", "Iniciar", "Fotografar", "Finalizar"];
 
@@ -428,6 +429,8 @@ export function ProviderAppPage() {
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [dashboard, setDashboard] = useState<{ weekJobs: number; pendingBalance: number; expiringDocs: number } | null>(null);
+  const [online, setOnline] = useState(isOnline());
+  const [queueStatus, setQueueStatus] = useState<QueueStatus>({ pendingActions: 0, pendingPhotos: 0 });
   const toast = useToast();
 
   const loadActive = async () => {
@@ -466,6 +469,19 @@ export function ProviderAppPage() {
     api<{ weekJobs: number; pendingBalance: number; expiringDocs: number }>("/assembly/provider/dashboard")
       .then(setDashboard)
       .catch(() => {});
+
+    // Monitora status online/offline e fila pendente
+    const handleOnline  = () => { setOnline(true);  void getQueueStatus().then(setQueueStatus); };
+    const handleOffline = () => setOnline(false);
+    window.addEventListener("online",  handleOnline);
+    window.addEventListener("offline", handleOffline);
+    void getQueueStatus().then(setQueueStatus);
+    const unsubSync = onSyncCompleted(() => void getQueueStatus().then(setQueueStatus));
+    return () => {
+      window.removeEventListener("online",  handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      unsubSync();
+    };
   }, []);
 
   useEffect(() => {
@@ -498,8 +514,25 @@ export function ProviderAppPage() {
     );
   }
 
+  const pendingTotal = queueStatus.pendingActions + queueStatus.pendingPhotos;
+
   return (
     <Page title="Portal do Montador" subtitle="Suas montagens e histórico completo">
+      {/* Banner de status offline */}
+      {!online && (
+        <div style={{ background: "#ff6f00", color: "#fff", padding: "8px 14px", borderRadius: 6, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Sem internet — ações serão sincronizadas quando voltar a conectar.</span>
+          {pendingTotal > 0 && <span style={{ fontWeight: 700 }}>{pendingTotal} pendente(s)</span>}
+        </div>
+      )}
+      {online && pendingTotal > 0 && (
+        <div style={{ background: "#e8f5e9", border: "1px solid var(--brand)", color: "var(--brand)", padding: "8px 14px", borderRadius: 6, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{pendingTotal} ação(ões) offline aguardando sincronização.</span>
+          <button className="ghostButton" onClick={() => { forceSync(); void getQueueStatus().then(setQueueStatus); }}>
+            Sincronizar agora
+          </button>
+        </div>
+      )}
       {dashboard && (
         <DashboardCard
           weekJobs={dashboard.weekJobs}

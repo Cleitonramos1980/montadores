@@ -63,7 +63,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const user = getStoredUser();
 
   const nav = ALL_NAV.filter(([, , , roles]) =>
-    roles === null || hasRole(...(roles as string[])),
+    roles === null || hasRole(...(roles as unknown as string[])),
   );
 
   const [oracleDown, setOracleDown] = useState(false);
