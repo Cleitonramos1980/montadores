@@ -119,14 +119,34 @@ export class SchedulingService {
       { id: jobId, orderId, scheduleId, providerId },
     );
 
-    // Calculate assembly cost from VLMAODEOBRA stored in ASSEMBLY_COST column
-    const costRow = await queryOne<{ total: number }>(
-      `SELECT COALESCE(SUM(QUANTITY * ASSEMBLY_COST), 0) AS TOTAL
-       FROM MONT_ORDER_ITEMS
-       WHERE ORDER_ID = :orderId AND REQUIRES_ASSEMBLY = 1`,
-      { orderId },
-    );
-    const amount = Number(costRow?.total ?? 0);
+    // Payment amount comes from commission rules × PCPEDI quantities (calculated during eligibility check).
+    // Fallback to 0 only when Oracle is offline and no commission data is available.
+    const amount = eligResult.dataSource === "winthor_pcpedi"
+      ? (eligResult.totalEstimatedCommission ?? 0)
+      : 0;
+
+    // Record eligible products for this assembly job
+    if (eligResult.eligibleProducts?.length) {
+      for (const ep of eligResult.eligibleProducts) {
+        await execDml(
+          `INSERT INTO MONT_ASSEMBLY_JOB_ITEMS
+             (ID, ASSEMBLY_JOB_ID, CODPROD, DESCRICAO, QUANTITY, RULE_SOURCE, COMMISSION_PERCENT, FIXED_AMOUNT, CALCULATED_AMOUNT)
+           VALUES
+             (:id, :jobId, :codprod, :descricao, :qty, :ruleSource, :commPct, :fixedAmt, :calcAmt)`,
+          {
+            id: uuid(),
+            jobId,
+            codprod: Number(ep.codprod),
+            descricao: ep.descricao ?? null,
+            qty: ep.quantity,
+            ruleSource: ep.ruleSource,
+            commPct: ep.commissionPercent ?? null,
+            fixedAmt: ep.fixedAmount ?? null,
+            calcAmt: ep.estimatedCommission,
+          },
+        );
+      }
+    }
 
     await execDml(
       `INSERT INTO MONT_PROVIDER_PAYMENTS (ID, PROVIDER_ID, ASSEMBLY_JOB_ID, AMOUNT, STATUS)

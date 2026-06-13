@@ -543,6 +543,16 @@ api.post("/sac/:id/close", asyncRoute(async (req, res) => {
 // Payments — requires FINANCEIRO, ADMIN or GESTOR role
 const financeiroRoles = requireRole("FINANCEIRO", "ADMIN", "GESTOR");
 
+// Commissions — write requires ADMIN or GESTOR; read is open to operational roles
+const commissionWriteRoles = requireRole("ADMIN", "GESTOR");
+const commissionReadRoles  = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA", "FINANCEIRO");
+
+// Agenda — requires operational access
+const agendaRoles = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA");
+
+// Audit — restricted to management roles
+const auditRoles = requireRole("ADMIN", "GESTOR");
+
 api.get("/payments", financeiroRoles, asyncRoute(async (req, res) => {
   const { page, pageSize } = z.object({
     page:     z.coerce.number().int().min(1).default(1),
@@ -696,7 +706,7 @@ api.get("/commissions/count", asyncRoute(async (_req, res) => {
 }));
 
 // List all configured commissions (MONT_PRODUCT_COMMISSIONS)
-api.get("/commissions", asyncRoute(async (_req, res) => {
+api.get("/commissions", commissionReadRoles, asyncRoute(async (_req, res) => {
   const { queryRows: qr } = await import("../db/db");
   res.json(await qr(
     `SELECT * FROM MONT_PRODUCT_COMMISSIONS ORDER BY DESCRIPTION ASC`,
@@ -704,7 +714,7 @@ api.get("/commissions", asyncRoute(async (_req, res) => {
 }));
 
 // Search PCPRODUT — no VLMAODEOBRA filter (column may not exist); requires search term
-api.get("/commissions/departments", asyncRoute(async (_req, res) => {
+api.get("/commissions/departments", commissionReadRoles, asyncRoute(async (_req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) { res.json([]); return; }
   const { queryRows: qr } = await import("../db/db");
@@ -716,7 +726,7 @@ api.get("/commissions/departments", asyncRoute(async (_req, res) => {
   ));
 }));
 
-api.get("/commissions/search", asyncRoute(async (req, res) => {
+api.get("/commissions/search", commissionReadRoles, asyncRoute(async (req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) { res.json([]); return; }
   const { queryRows: qr } = await import("../db/db");
@@ -775,7 +785,7 @@ api.get("/commissions/search", asyncRoute(async (req, res) => {
 }));
 
 // Upsert commission for a product — supports FIXED_AMOUNT and PERCENTAGE types
-api.put("/commissions/:codprod", asyncRoute(async (req, res) => {
+api.put("/commissions/:codprod", commissionWriteRoles, asyncRoute(async (req, res) => {
   const { execDml: dml, queryOne: qo } = await import("../db/db");
   const { v4: uuidv4 } = await import("uuid");
   const body = z.object({
@@ -832,7 +842,7 @@ api.put("/commissions/:codprod", asyncRoute(async (req, res) => {
 }));
 
 // Toggle active or delete commission
-api.delete("/commissions/:codprod", asyncRoute(async (req, res) => {
+api.delete("/commissions/:codprod", commissionWriteRoles, asyncRoute(async (req, res) => {
   const { execDml: dml } = await import("../db/db");
   await dml(
     "DELETE FROM MONT_PRODUCT_COMMISSIONS WHERE CODPROD = :codprod",
@@ -841,7 +851,7 @@ api.delete("/commissions/:codprod", asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-api.patch("/commissions/:codprod/toggle", asyncRoute(async (req, res) => {
+api.patch("/commissions/:codprod/toggle", commissionWriteRoles, asyncRoute(async (req, res) => {
   const { execDml: dml } = await import("../db/db");
   await dml(
     `UPDATE MONT_PRODUCT_COMMISSIONS
@@ -855,7 +865,7 @@ api.patch("/commissions/:codprod/toggle", asyncRoute(async (req, res) => {
 
 // ── Department Commissions ────────────────────────────────────────────────────
 
-api.get("/commissions/dept", asyncRoute(async (_req, res) => {
+api.get("/commissions/dept", commissionReadRoles, asyncRoute(async (_req, res) => {
   const { queryRows: qr } = await import("../db/db");
   const { isOracleEnabled } = await import("../db/oracle");
   // Join PCDEPTO if Oracle available to get current department name
@@ -873,7 +883,7 @@ api.get("/commissions/dept", asyncRoute(async (_req, res) => {
   }
 }));
 
-api.put("/commissions/dept/:codepto", asyncRoute(async (req, res) => {
+api.put("/commissions/dept/:codepto", commissionWriteRoles, asyncRoute(async (req, res) => {
   const { execDml: dml, queryOne: qo } = await import("../db/db");
   const { v4: uuidv4 } = await import("uuid");
   const body = z.object({
@@ -922,13 +932,13 @@ api.put("/commissions/dept/:codepto", asyncRoute(async (req, res) => {
   res.json({ ok: true, codepto });
 }));
 
-api.delete("/commissions/dept/:codepto", asyncRoute(async (req, res) => {
+api.delete("/commissions/dept/:codepto", commissionWriteRoles, asyncRoute(async (req, res) => {
   const { execDml: dml } = await import("../db/db");
   await dml("DELETE FROM MONT_DEPT_COMMISSIONS WHERE CODEPTO = :codepto", { codepto: param(req.params.codepto) });
   res.json({ ok: true });
 }));
 
-api.patch("/commissions/dept/:codepto/toggle", asyncRoute(async (req, res) => {
+api.patch("/commissions/dept/:codepto/toggle", commissionWriteRoles, asyncRoute(async (req, res) => {
   const { execDml: dml } = await import("../db/db");
   await dml(
     `UPDATE MONT_DEPT_COMMISSIONS
@@ -941,7 +951,7 @@ api.patch("/commissions/dept/:codepto/toggle", asyncRoute(async (req, res) => {
 }));
 
 // Audit logs
-api.get("/audit-logs", asyncRoute(async (_req, res) => {
+api.get("/audit-logs", auditRoles, asyncRoute(async (_req, res) => {
   const { queryRows: qr } = await import("../db/db");
   const rows = await qr(`SELECT * FROM MONT_AUDIT_LOGS ORDER BY CREATED_AT DESC FETCH FIRST 200 ROWS ONLY`);
   res.json(rows);
@@ -992,7 +1002,7 @@ api.get("/montador/minhas-montagens/:jobId", asyncRoute(async (req, res) => {
 
 const agendaEntrega = new AgendaEntregaService();
 
-api.get("/agenda/candidatos", asyncRoute(async (req, res) => {
+api.get("/agenda/candidatos", agendaRoles, asyncRoute(async (req, res) => {
   const { somenteEntregues, somenteSemConvite, somenteElegiveis, daysBack, codfilial, numped } = z.object({
     somenteEntregues:  z.coerce.number().int().min(0).max(1).default(1),
     somenteSemConvite: z.coerce.number().int().min(0).max(1).default(0),
@@ -1012,7 +1022,7 @@ api.get("/agenda/candidatos", asyncRoute(async (req, res) => {
   }));
 }));
 
-api.post("/agenda/sync", asyncRoute(async (req, res) => {
+api.post("/agenda/sync", agendaRoles, asyncRoute(async (req, res) => {
   const body = z.object({
     modo:     z.enum(["DRY_RUN", "PRODUCAO"]).default("DRY_RUN"),
     daysBack: z.coerce.number().int().min(1).max(365).default(60),
@@ -1020,15 +1030,15 @@ api.post("/agenda/sync", asyncRoute(async (req, res) => {
   res.status(201).json(await agendaEntrega.sync({ modo: body.modo, daysBack: body.daysBack }));
 }));
 
-api.get("/agenda/diagnostico", asyncRoute(async (_req, res) => {
+api.get("/agenda/diagnostico", agendaRoles, asyncRoute(async (_req, res) => {
   res.json(await agendaEntrega.diagnostico());
 }));
 
-api.get("/agenda/stats", asyncRoute(async (_req, res) => {
+api.get("/agenda/stats", agendaRoles, asyncRoute(async (_req, res) => {
   res.json(await agendaEntrega.getSummaryStats());
 }));
 
-api.post("/agenda/candidatos/:numped/montagem-agendada", asyncRoute(async (req, res) => {
+api.post("/agenda/candidatos/:numped/montagem-agendada", agendaRoles, asyncRoute(async (req, res) => {
   const numped = param(req.params.numped);
   await agendaEntrega.marcarMontagemAgendada(numped, new Date());
   res.json({ ok: true });

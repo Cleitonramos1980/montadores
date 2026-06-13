@@ -227,6 +227,21 @@ const TABLES: Array<{ name: string; ddl: string }> = [
     )`,
   },
   {
+    name: "MONT_ASSEMBLY_JOB_ITEMS",
+    ddl: `CREATE TABLE MONT_ASSEMBLY_JOB_ITEMS (
+      ID VARCHAR2(36) PRIMARY KEY,
+      ASSEMBLY_JOB_ID VARCHAR2(36) NOT NULL,
+      CODPROD NUMBER NOT NULL,
+      DESCRICAO VARCHAR2(500),
+      QUANTITY NUMBER(14,4) NOT NULL,
+      RULE_SOURCE VARCHAR2(20) NOT NULL,
+      COMMISSION_PERCENT NUMBER(8,4),
+      FIXED_AMOUNT NUMBER(14,4),
+      CALCULATED_AMOUNT NUMBER(14,4),
+      CREATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
+  {
     name: "MONT_ASSEMBLY_PHOTOS",
     ddl: `CREATE TABLE MONT_ASSEMBLY_PHOTOS (
       ID VARCHAR2(36) PRIMARY KEY,
@@ -839,6 +854,7 @@ const FK_CONSTRAINTS: Array<{ name: string; table: string; column: string; refTa
   { name: "FK_MONT_UR_USER",   table: "MONT_USER_ROLES",            column: "USER_ID",         refTable: "MONT_USERS",              refColumn: "ID" },
   { name: "FK_MONT_UR_ROLE",   table: "MONT_USER_ROLES",            column: "ROLE_ID",         refTable: "MONT_ROLES",              refColumn: "ID" },
   { name: "FK_MONT_ORD_CUST",  table: "MONT_ORDERS",                column: "CUSTOMER_ID",     refTable: "MONT_CUSTOMERS",          refColumn: "ID" },
+  { name: "FK_MONT_AJI_JOB",   table: "MONT_ASSEMBLY_JOB_ITEMS",   column: "ASSEMBLY_JOB_ID", refTable: "MONT_ASSEMBLY_JOBS",      refColumn: "ID" },
   { name: "FK_MONT_PAYM_JOB",  table: "MONT_PROVIDER_PAYMENTS",     column: "ASSEMBLY_JOB_ID", refTable: "MONT_ASSEMBLY_JOBS",      refColumn: "ID" },
   { name: "FK_MONT_CALCI_PMT", table: "MONT_COMMISSION_CALC_ITEMS", column: "PAYMENT_ID",      refTable: "MONT_PROVIDER_PAYMENTS",  refColumn: "ID" },
   { name: "FK_MONT_PRT_USER",  table: "MONT_PASSWORD_RESET_TOKENS", column: "USER_ID",         refTable: "MONT_USERS",              refColumn: "ID" },

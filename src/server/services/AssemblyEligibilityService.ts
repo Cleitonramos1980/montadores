@@ -5,6 +5,7 @@ import { WinthorPedidoItemRepository } from "../oracle/WinthorPedidoItemReposito
 export type EligibleProduct = {
   codprod: string;
   descricao: string | null;
+  quantity: number;
   ruleSource: "product" | "department";
   ruleId: string;
   calculationType: string;
@@ -123,6 +124,7 @@ export class AssemblyEligibilityService {
       eligibleProducts.push({
         codprod,
         descricao: item.descricao ?? null,
+        quantity: qt,
         ruleSource: prodRule ? "product" : "department",
         ruleId: rule.id,
         calculationType: rule.calculation_type,

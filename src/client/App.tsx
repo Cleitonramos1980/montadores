@@ -23,7 +23,7 @@ import { PublicReviewPage } from "./pages/PublicReviewPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
 import { SacPage } from "./pages/SacPage";
 import { SchedulePage } from "./pages/SchedulePage";
-import { getToken } from "./lib/api";
+import { getToken, hasRole } from "./lib/api";
 
 export function App() {
   const path = location.pathname;
@@ -46,11 +46,23 @@ export function App() {
     return null;
   }
 
+  const canAccessCommissions = hasRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA", "FINANCEIRO");
+  const canAccessAgenda      = hasRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA");
+  const canAccessFinanceiro  = hasRole("ADMIN", "GESTOR", "FINANCEIRO");
+  const canAccessAuditoria   = hasRole("ADMIN", "GESTOR");
+
+  const Forbidden = () => (
+    <div style={{ padding: "2rem", textAlign: "center" }}>
+      <h2>Acesso restrito</h2>
+      <p>Você não tem permissão para acessar esta página.</p>
+    </div>
+  );
+
   let page = <DashboardPage />;
   if (path === "/montadores/dashboard") page = <DashboardPage />;
   if (path === "/montadores/pedidos") page = <OrdersPage />;
   if (path.startsWith("/montadores/pedidos/")) page = <OrderDetailPage id={path.split("/").pop()!} />;
-  if (path === "/montadores/agenda") page = <SchedulePage />;
+  if (path === "/montadores/agenda") page = canAccessAgenda ? <SchedulePage /> : <Forbidden />;
   if (path === "/montadores/prestadores") page = <ProvidersPage />;
   if (path === "/montadores/prestadores/novo") page = <ProviderNewPage />;
   if (path.match(/^\/montadores\/prestadores\/[^/]+\/perfil$/)) {
@@ -58,17 +70,18 @@ export function App() {
   }
   if (path === "/montadores/aprovacao") page = <ApprovalPage />;
   if (path === "/montadores/sac") page = <SacPage />;
-  if (path === "/montadores/financeiro") page = <FinancePage />;
-  if (path === "/montadores/comissoes") page = <CommissionsPage />;
+  if (path === "/montadores/financeiro") page = canAccessFinanceiro ? <FinancePage /> : <Forbidden />;
+  if (path === "/montadores/comissoes") page = canAccessCommissions ? <CommissionsPage /> : <Forbidden />;
   if (path === "/montadores/avaliacoes") page = <ReviewsPage />;
   if (path === "/montadores/mensagens") page = <FluxoMensagensPage />;
-  if (path === "/montadores/mensagens-templates") page = <MessageTemplatesPage />;
-  if (path === "/montadores/regua-fluxo") page = <FlowRulerPage />;
-  if (path === "/montadores/integracao-winthor") page = <IntegrationPage />;
+  if (path === "/montadores/mensagens-templates") page = hasRole("ADMIN", "GESTOR") ? <MessageTemplatesPage /> : <Forbidden />;
+  if (path === "/montadores/regua-fluxo") page = hasRole("ADMIN", "GESTOR") ? <FlowRulerPage /> : <Forbidden />;
+  if (path === "/montadores/integracao-winthor") page = hasRole("ADMIN", "GESTOR") ? <IntegrationPage /> : <Forbidden />;
   if (path === "/montadores/app") page = <ProviderAppPage />;
   if (path === "/montadores/app/minhas-montagens") page = <MontadorMinhasMontagens />;
-  if (path === "/montadores/auditoria") page = <AuditPage />;
-  if (path === "/montadores/saude") page = <SystemHealthPage />;
+  if (path === "/montadores/auditoria") page = canAccessAuditoria ? <AuditPage /> : <Forbidden />;
+  if (path === "/montadores/saude") page = hasRole("ADMIN", "GESTOR") ? <SystemHealthPage /> : <Forbidden />;
+
 
   return <Layout>{page}</Layout>;
 }

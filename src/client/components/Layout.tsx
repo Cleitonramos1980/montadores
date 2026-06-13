@@ -4,25 +4,25 @@ import {
   Shield, Smartphone, Star, Users, X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { api, clearToken, getStoredUser } from "../lib/api";
+import { api, clearToken, getStoredUser, hasRole } from "../lib/api";
 
-const nav = [
-  ["Dashboard", "/montadores/dashboard", Gauge],
-  ["Pedidos", "/montadores/pedidos", ClipboardList],
-  ["Agenda", "/montadores/agenda", CalendarDays],
-  ["Montadores", "/montadores/prestadores", Hammer],
-  ["Aprovação", "/montadores/aprovacao", Users],
-  ["App Montador", "/montadores/app", Smartphone],
-  ["Minhas Montagens", "/montadores/app/minhas-montagens", History],
-  ["SAC", "/montadores/sac", Headphones],
-  ["Financeiro", "/montadores/financeiro", Landmark],
-  ["Comissões", "/montadores/comissoes", BadgeDollarSign],
-  ["Avaliações", "/montadores/avaliacoes", Star],
-  ["Fluxo Mensagens", "/montadores/mensagens", MessageSquareText],
-  ["Régua", "/montadores/regua-fluxo", GitBranch],
-  ["WinThor", "/montadores/integracao-winthor", PlugZap],
-  ["Saúde", "/montadores/saude", Activity],
-  ["Auditoria", "/montadores/auditoria", Shield],
+const ALL_NAV = [
+  ["Dashboard",       "/montadores/dashboard",              Gauge,             null],
+  ["Pedidos",         "/montadores/pedidos",                ClipboardList,     null],
+  ["Agenda",          "/montadores/agenda",                 CalendarDays,      ["ADMIN","GESTOR","OPERACAO","LOGISTICA"]],
+  ["Montadores",      "/montadores/prestadores",            Hammer,            null],
+  ["Aprovação",       "/montadores/aprovacao",              Users,             null],
+  ["App Montador",    "/montadores/app",                    Smartphone,        null],
+  ["Minhas Montagens","/montadores/app/minhas-montagens",   History,           null],
+  ["SAC",             "/montadores/sac",                    Headphones,        null],
+  ["Financeiro",      "/montadores/financeiro",             Landmark,          ["ADMIN","GESTOR","FINANCEIRO"]],
+  ["Comissões",       "/montadores/comissoes",              BadgeDollarSign,   ["ADMIN","GESTOR","OPERACAO","LOGISTICA","FINANCEIRO"]],
+  ["Avaliações",      "/montadores/avaliacoes",             Star,              null],
+  ["Fluxo Mensagens", "/montadores/mensagens",              MessageSquareText, null],
+  ["Régua",           "/montadores/regua-fluxo",            GitBranch,         ["ADMIN","GESTOR"]],
+  ["WinThor",         "/montadores/integracao-winthor",     PlugZap,           ["ADMIN","GESTOR"]],
+  ["Saúde",           "/montadores/saude",                  Activity,          ["ADMIN","GESTOR"]],
+  ["Auditoria",       "/montadores/auditoria",              Shield,            ["ADMIN","GESTOR"]],
 ] as const;
 
 type Notifications = {
@@ -61,6 +61,10 @@ function NotifBadge({ count }: { count: number }) {
 export function Layout({ children }: { children: ReactNode }) {
   const active = location.pathname;
   const user = getStoredUser();
+
+  const nav = ALL_NAV.filter(([, , , roles]) =>
+    roles === null || hasRole(...(roles as string[])),
+  );
 
   const [oracleDown, setOracleDown] = useState(false);
   const [notif, setNotif] = useState<Notifications | null>(null);

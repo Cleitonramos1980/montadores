@@ -22,6 +22,12 @@ export function getStoredUser(): { name: string; email: string; roles: string[] 
   }
 }
 
+export function hasRole(...roles: string[]): boolean {
+  const user = getStoredUser();
+  if (!user?.roles?.length) return false;
+  return roles.some((r) => user.roles.includes(r));
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {

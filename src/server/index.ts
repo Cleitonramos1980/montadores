@@ -70,7 +70,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 
   const lower = message.toLowerCase();
   const isNotFound = lower.includes("não encontrado") || lower.includes("not found");
-  const isUnauthorized = lower.includes("autenticação") || lower.includes("token");
+  const isUnauthorized = lower.includes("autenticação") || lower.includes("token") || lower.includes("credenciais") || lower.includes("inativo") || lower.includes("bloqueado");
   const status = isUnauthorized ? 401 : isNotFound ? 404 : 400;
 
   if (!(err instanceof Error)) {
