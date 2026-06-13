@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "3333:3333"
+    environment:
+      - NODE_ENV=production
+      - PORT=3333
+      # Oracle — override with real values or use an .env file
+      - ORACLE_USER=${ORACLE_USER:-}
+      - ORACLE_PASSWORD=${ORACLE_PASSWORD:-}
+      - ORACLE_CONNECTION_STRING=${ORACLE_CONNECTION_STRING:-}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@montadores.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin@2026!}
+    volumes:
+      - uploads:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3333/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  uploads:

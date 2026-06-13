@@ -1,0 +1,21 @@
+node_modules/
+dist/
+data/
+.env
+.env.local
+.DS_Store
+npm-debug.log*
+
+# Logs gerados pelo servidor de desenvolvimento
+*.log
+server.log
+server.err.log
+client.log
+vite.log
+vite.err.log
+
+# Uploads de arquivos dos montadores
+uploads/
+
+# Cache e temporários
+.claude/
