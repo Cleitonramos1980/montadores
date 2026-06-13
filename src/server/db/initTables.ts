@@ -698,6 +698,110 @@ const TABLES: Array<{ name: string; ddl: string }> = [
       CREATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
     )`,
   },
+  // ── Notificações do montador ──────────────────────────────────────────────
+  {
+    name: "MONT_PROVIDER_NOTIFICATIONS",
+    ddl: `CREATE TABLE MONT_PROVIDER_NOTIFICATIONS (
+      ID              VARCHAR2(36) PRIMARY KEY,
+      PROVIDER_ID     VARCHAR2(36) NOT NULL,
+      TYPE            VARCHAR2(80) NOT NULL,
+      TITLE           VARCHAR2(255) NOT NULL,
+      BODY            VARCHAR2(2000) NOT NULL,
+      ASSEMBLY_JOB_ID VARCHAR2(36),
+      NUMPED          VARCHAR2(50),
+      READ_AT         TIMESTAMP,
+      IDEMPOTENCY_KEY VARCHAR2(255),
+      DRY_RUN         NUMBER(1) DEFAULT 1 NOT NULL,
+      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONSTRAINT UQ_MONT_PROVNOTIF_IDEMP UNIQUE (IDEMPOTENCY_KEY)
+    )`,
+  },
+  // ── Configuração de avaliações por fase ────────────────────────────────────
+  {
+    name: "MONT_EVAL_CONFIGS",
+    ddl: `CREATE TABLE MONT_EVAL_CONFIGS (
+      ID          VARCHAR2(36) PRIMARY KEY,
+      PHASE       VARCHAR2(40) NOT NULL,
+      TITLE       VARCHAR2(255) NOT NULL,
+      DESCRIPTION VARCHAR2(2000),
+      ACTIVE      NUMBER(1) DEFAULT 1 NOT NULL,
+      LINK_TTL_DAYS NUMBER(3) DEFAULT 7 NOT NULL,
+      CREATED_BY  VARCHAR2(36),
+      UPDATED_BY  VARCHAR2(36),
+      CREATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      UPDATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONSTRAINT UQ_MONT_EVAL_CONFIGS_PHASE UNIQUE (PHASE)
+    )`,
+  },
+  {
+    name: "MONT_EVAL_QUESTIONS",
+    ddl: `CREATE TABLE MONT_EVAL_QUESTIONS (
+      ID          VARCHAR2(36) PRIMARY KEY,
+      CONFIG_ID   VARCHAR2(36) NOT NULL,
+      POSITION    NUMBER(3) DEFAULT 1 NOT NULL,
+      TYPE        VARCHAR2(40) DEFAULT 'SCALE' NOT NULL,
+      LABEL       VARCHAR2(500) NOT NULL,
+      REQUIRED    NUMBER(1) DEFAULT 1 NOT NULL,
+      MIN_LABEL   VARCHAR2(100),
+      MAX_LABEL   VARCHAR2(100),
+      OPTIONS_JSON CLOB,
+      ACTIVE      NUMBER(1) DEFAULT 1 NOT NULL,
+      CREATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
+  // ── Links públicos de avaliação ────────────────────────────────────────────
+  {
+    name: "MONT_EVAL_LINKS",
+    ddl: `CREATE TABLE MONT_EVAL_LINKS (
+      ID              VARCHAR2(36) PRIMARY KEY,
+      TOKEN           VARCHAR2(255) NOT NULL,
+      CONFIG_ID       VARCHAR2(36) NOT NULL,
+      ORDER_ID        VARCHAR2(36),
+      ASSEMBLY_JOB_ID VARCHAR2(36),
+      NUMPED          VARCHAR2(50),
+      CODCLI          VARCHAR2(50),
+      PHASE           VARCHAR2(40) NOT NULL,
+      EXPIRES_AT      TIMESTAMP NOT NULL,
+      USED_AT         TIMESTAMP,
+      CREATED_BY      VARCHAR2(36),
+      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONSTRAINT UQ_MONT_EVAL_LINKS_TOKEN UNIQUE (TOKEN)
+    )`,
+  },
+  // ── Respostas de avaliação ─────────────────────────────────────────────────
+  {
+    name: "MONT_EVAL_RESPONSES",
+    ddl: `CREATE TABLE MONT_EVAL_RESPONSES (
+      ID              VARCHAR2(36) PRIMARY KEY,
+      LINK_ID         VARCHAR2(36) NOT NULL,
+      CONFIG_ID       VARCHAR2(36) NOT NULL,
+      ORDER_ID        VARCHAR2(36),
+      ASSEMBLY_JOB_ID VARCHAR2(36),
+      NUMPED          VARCHAR2(50),
+      CODCLI          VARCHAR2(50),
+      PHASE           VARCHAR2(40) NOT NULL,
+      SCORE           NUMBER(5,2),
+      CLASSIFICATION  VARCHAR2(40),
+      COMMENT         VARCHAR2(4000),
+      SAC_TRIGGERED   NUMBER(1) DEFAULT 0 NOT NULL,
+      SAC_CASE_ID     VARCHAR2(36),
+      PAYMENT_IMPACT  VARCHAR2(40),
+      IP              VARCHAR2(50),
+      USER_AGENT      VARCHAR2(500),
+      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
+  {
+    name: "MONT_EVAL_ANSWERS",
+    ddl: `CREATE TABLE MONT_EVAL_ANSWERS (
+      ID           VARCHAR2(36) PRIMARY KEY,
+      RESPONSE_ID  VARCHAR2(36) NOT NULL,
+      QUESTION_ID  VARCHAR2(36) NOT NULL,
+      VALUE_TEXT   VARCHAR2(4000),
+      VALUE_NUMBER NUMBER(5,2),
+      CREATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
 ];
 
 const NEW_COLUMNS: ColumnDef[] = [
@@ -800,6 +904,19 @@ const INDEXES: IndexDef[] = [
   { name: "IDX_MONT_PPA_PROV",         table: "MONT_PROVIDER_PAYMENT_ACCOUNTS", columns: "PROVIDER_ID" },
   // Assembly job items
   { name: "IDX_MONT_AJI_CODPROD",      table: "MONT_ASSEMBLY_JOB_ITEMS", columns: "CODPROD" },
+  // Provider notifications
+  { name: "IDX_MONT_PROVNOTIF_PROV",   table: "MONT_PROVIDER_NOTIFICATIONS", columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_PROVNOTIF_JOB",    table: "MONT_PROVIDER_NOTIFICATIONS", columns: "ASSEMBLY_JOB_ID" },
+  // Eval configs + questions
+  { name: "IDX_MONT_EVALQ_CONFIG",     table: "MONT_EVAL_QUESTIONS", columns: "CONFIG_ID, POSITION" },
+  // Eval links
+  { name: "IDX_MONT_EVALLINK_TOKEN",   table: "MONT_EVAL_LINKS", columns: "TOKEN", unique: true },
+  { name: "IDX_MONT_EVALLINK_ORDER",   table: "MONT_EVAL_LINKS", columns: "ORDER_ID" },
+  { name: "IDX_MONT_EVALLINK_PHASE",   table: "MONT_EVAL_LINKS", columns: "PHASE" },
+  // Eval responses + answers
+  { name: "IDX_MONT_EVALRESP_LINK",    table: "MONT_EVAL_RESPONSES", columns: "LINK_ID" },
+  { name: "IDX_MONT_EVALRESP_ORDER",   table: "MONT_EVAL_RESPONSES", columns: "ORDER_ID" },
+  { name: "IDX_MONT_EVALANS_RESP",     table: "MONT_EVAL_ANSWERS", columns: "RESPONSE_ID" },
 ];
 
 async function tableExists(tableName: string): Promise<boolean> {

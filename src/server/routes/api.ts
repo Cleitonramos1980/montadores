@@ -21,6 +21,10 @@ import { MessageTemplateService } from "../services/MessageTemplateService";
 import { MontadorHistoricoService } from "../services/MontadorHistoricoService";
 import { AgendaEntregaService } from "../services/AgendaEntregaService";
 import { AssemblyEligibilityService } from "../services/AssemblyEligibilityService";
+import { ProviderNotificationService } from "../services/ProviderNotificationService";
+import { EvaluationConfigService } from "../services/EvaluationConfigService";
+import { EvaluationLinkService } from "../services/EvaluationLinkService";
+import { EvaluationResponseService } from "../services/EvaluationResponseService";
 import { queryOne } from "../db/db";
 
 export const api = Router();
@@ -155,6 +159,38 @@ api.post("/public/reviews/:token/assembly", asyncRoute(async (req, res) => {
 api.post("/auth/forgot-password", asyncRoute(async (req, res) => {
   const body = z.object({ email: z.string().email() }).parse(req.body);
   res.json(await auth.forgotPassword(body.email));
+}));
+
+// ── Avaliação pública — links configurados (sem autenticação) ─────────────────
+const _evalLinkSvcPublic = new EvaluationLinkService();
+const _evalRespSvcPublic = new EvaluationResponseService();
+
+api.get("/public/eval/:token", asyncRoute(async (req, res) => {
+  const linkInfo = await _evalLinkSvcPublic.getByToken(param(req.params.token));
+  if (!linkInfo) { res.status(404).json({ error: "Link de avaliação inválido." }); return; }
+  if (linkInfo.usedAt) { res.status(410).json({ error: "Esta avaliação já foi respondida.", alreadyAnswered: true }); return; }
+  if (new Date() > linkInfo.expiresAt) { res.status(410).json({ error: "Este link de avaliação expirou.", expired: true }); return; }
+  res.json(linkInfo);
+}));
+
+api.post("/public/eval/:token/respond", asyncRoute(async (req, res) => {
+  const token = param(req.params.token);
+  const body = z.object({
+    answers: z.array(z.object({
+      questionId:  z.string(),
+      valueText:   z.string().max(4000).optional(),
+      valueNumber: z.coerce.number().optional(),
+    })).min(1),
+    comment: z.string().max(4000).optional(),
+  }).parse(req.body);
+  const ip        = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() || req.socket.remoteAddress;
+  const userAgent = req.headers["user-agent"];
+  res.status(201).json(await _evalRespSvcPublic.submit(token, {
+    answers:   body.answers,
+    comment:   body.comment,
+    ip,
+    userAgent,
+  }));
 }));
 
 api.post("/auth/reset-password", asyncRoute(async (req, res) => {
@@ -1596,3 +1632,132 @@ api.post("/integration/failures/:id/retry", authMiddleware, asyncRoute(async (re
   );
   res.json({ ok: true, retryCount: Number(failure.retry_count) + 1 });
 }));
+
+// ── Notificações do montador ──────────────────────────────────────────────────
+
+const providerNotifSvc = new ProviderNotificationService();
+
+async function resolveProviderByEmail(email: string): Promise<string | null> {
+  const { queryOne: qo } = await import("../db/db");
+  const row = await qo<{ id: string }>(
+    "SELECT ID FROM MONT_PROVIDERS WHERE LOWER(EMAIL) = LOWER(:email) AND ACTIVE = 1",
+    { email },
+  );
+  return row?.id ?? null;
+}
+
+api.get("/provider-notifications", asyncRoute(async (req, res) => {
+  const providerId = await resolveProviderByEmail(req.user!.email);
+  if (!providerId) { res.json({ rows: [], unread: 0 }); return; }
+  const unreadOnly = req.query.unread === "true";
+  const rows = await providerNotifSvc.listForProvider(providerId, unreadOnly);
+  const unread = await providerNotifSvc.unreadCount(providerId);
+  res.json({ rows, unread });
+}));
+
+api.patch("/provider-notifications/:id/read", asyncRoute(async (req, res) => {
+  const providerId = await resolveProviderByEmail(req.user!.email);
+  if (!providerId) { res.status(403).json({ error: "Montador não encontrado." }); return; }
+  const ok = await providerNotifSvc.markRead(param(req.params.id), providerId);
+  if (!ok) { res.status(404).json({ error: "Notificação não encontrada." }); return; }
+  res.json({ ok: true });
+}));
+
+// ── Configuração de avaliações por fase ────────────────────────────────────────
+
+const evalConfigSvc = new EvaluationConfigService();
+const evalLinkSvc   = new EvaluationLinkService();
+const evalRespSvc   = new EvaluationResponseService();
+
+const evalAdminRoles = requireRole("ADMIN", "GESTOR");
+
+api.get("/eval-configs", evalAdminRoles, asyncRoute(async (_req, res) => {
+  res.json(await evalConfigSvc.list());
+}));
+
+api.post("/eval-configs", evalAdminRoles, asyncRoute(async (req, res) => {
+  const body = z.object({
+    phase:       z.enum(["ATENDIMENTO", "ENTREGA", "MONTAGEM"]),
+    title:       z.string().min(3).max(255),
+    description: z.string().max(2000).optional(),
+    linkTtlDays: z.coerce.number().int().min(1).max(365).optional(),
+  }).parse(req.body);
+  res.status(201).json(await evalConfigSvc.create({ ...body, userId: req.user!.sub }));
+}));
+
+api.get("/eval-configs/:id", evalAdminRoles, asyncRoute(async (req, res) => {
+  const config = await evalConfigSvc.getById(param(req.params.id));
+  if (!config) { res.status(404).json({ error: "Configuração não encontrada." }); return; }
+  res.json(config);
+}));
+
+api.put("/eval-configs/:id", evalAdminRoles, asyncRoute(async (req, res) => {
+  const body = z.object({
+    title:       z.string().min(3).max(255).optional(),
+    description: z.string().max(2000).optional(),
+    linkTtlDays: z.coerce.number().int().min(1).max(365).optional(),
+  }).parse(req.body);
+  const updated = await evalConfigSvc.update(param(req.params.id), { ...body, userId: req.user!.sub });
+  if (!updated) { res.status(404).json({ error: "Configuração não encontrada." }); return; }
+  res.json(updated);
+}));
+
+api.patch("/eval-configs/:id/toggle-active", evalAdminRoles, asyncRoute(async (req, res) => {
+  const body = z.object({ active: z.boolean() }).parse(req.body);
+  const ok = await evalConfigSvc.toggleActive(param(req.params.id), body.active);
+  if (!ok) { res.status(404).json({ error: "Configuração não encontrada." }); return; }
+  res.json({ ok: true });
+}));
+
+api.get("/eval-configs/:id/questions", evalAdminRoles, asyncRoute(async (req, res) => {
+  const config = await evalConfigSvc.getById(param(req.params.id));
+  if (!config) { res.status(404).json({ error: "Configuração não encontrada." }); return; }
+  res.json(config.questions ?? []);
+}));
+
+api.post("/eval-configs/:id/questions", evalAdminRoles, asyncRoute(async (req, res) => {
+  const body = z.object({
+    type:     z.enum(["SCALE", "STARS", "TEXT", "SINGLE_CHOICE"]).optional(),
+    label:    z.string().min(3).max(500),
+    required: z.boolean().optional(),
+    minLabel: z.string().max(100).optional(),
+    maxLabel: z.string().max(100).optional(),
+    options:  z.array(z.string().min(1)).optional(),
+    position: z.coerce.number().int().min(1).optional(),
+  }).parse(req.body);
+  res.status(201).json(await evalConfigSvc.addQuestion(param(req.params.id), body));
+}));
+
+api.put("/eval-configs/questions/:qid", evalAdminRoles, asyncRoute(async (req, res) => {
+  const body = z.object({
+    label:    z.string().min(3).max(500).optional(),
+    required: z.boolean().optional(),
+    minLabel: z.string().max(100).optional(),
+    maxLabel: z.string().max(100).optional(),
+    options:  z.array(z.string().min(1)).optional(),
+    position: z.coerce.number().int().min(1).optional(),
+  }).parse(req.body);
+  const ok = await evalConfigSvc.updateQuestion(param(req.params.qid), body);
+  if (!ok) { res.status(404).json({ error: "Pergunta não encontrada." }); return; }
+  res.json({ ok: true });
+}));
+
+api.delete("/eval-configs/questions/:qid", evalAdminRoles, asyncRoute(async (req, res) => {
+  const ok = await evalConfigSvc.deleteQuestion(param(req.params.qid));
+  if (!ok) { res.status(404).json({ error: "Pergunta não encontrada." }); return; }
+  res.json({ ok: true });
+}));
+
+// ── Gerar link de avaliação ────────────────────────────────────────────────────
+
+api.post("/eval-links", evalAdminRoles, asyncRoute(async (req, res) => {
+  const body = z.object({
+    phase:          z.enum(["ATENDIMENTO", "ENTREGA", "MONTAGEM"]),
+    orderId:        z.string().optional(),
+    assemblyJobId:  z.string().optional(),
+    numped:         z.string().optional(),
+    codcli:         z.string().optional(),
+  }).parse(req.body);
+  res.status(201).json(await evalLinkSvc.generate({ ...body, userId: req.user!.sub }));
+}));
+

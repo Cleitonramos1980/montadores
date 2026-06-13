@@ -21,6 +21,8 @@ import { ProviderRegistrationPage } from "./pages/ProviderRegistrationPage";
 import { ProvidersPage } from "./pages/ProvidersPage";
 import { PublicReviewPage } from "./pages/PublicReviewPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
+import { EvaluationConfigPage } from "./pages/EvaluationConfigPage";
+import { PublicEvaluationPage } from "./pages/PublicEvaluationPage";
 import { SacPage } from "./pages/SacPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { getToken, hasRole } from "./lib/api";
@@ -31,6 +33,7 @@ export function App() {
   // Public routes — no auth required, no layout
   if (path.startsWith("/montadores/jornada-publica/")) return <CustomerJourneyPage token={path.split("/").pop()!} />;
   if (path.startsWith("/montadores/avaliacao/")) return <PublicReviewPage token={path.split("/").pop()!} />;
+  if (path.startsWith("/montadores/eval/")) return <PublicEvaluationPage token={path.split("/").pop()!} />;
   if (path === "/montadores/cadastro") return <ProviderRegistrationPage />;
   if (path === "/montadores/login") return <LoginPage />;
 
@@ -73,6 +76,7 @@ export function App() {
   if (path === "/montadores/financeiro") page = canAccessFinanceiro ? <FinancePage /> : <Forbidden />;
   if (path === "/montadores/comissoes") page = canAccessCommissions ? <CommissionsPage /> : <Forbidden />;
   if (path === "/montadores/avaliacoes") page = <ReviewsPage />;
+  if (path === "/montadores/eval-config") page = canAccessAuditoria ? <EvaluationConfigPage /> : <Forbidden />;
   if (path === "/montadores/mensagens") page = <FluxoMensagensPage />;
   if (path === "/montadores/mensagens-templates") page = hasRole("ADMIN", "GESTOR") ? <MessageTemplatesPage /> : <Forbidden />;
   if (path === "/montadores/regua-fluxo") page = hasRole("ADMIN", "GESTOR") ? <FlowRulerPage /> : <Forbidden />;

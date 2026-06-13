@@ -418,12 +418,87 @@ function DashboardCard({ weekJobs, pendingBalance, expiringDocs }: { weekJobs: n
   );
 }
 
+// ─── Notificações ─────────────────────────────────────────────────────────────
+
+type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  numped: string | null;
+  assembly_job_id: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+function NotificationsPanel({
+  notifications,
+  loading,
+  onMarkRead,
+}: {
+  notifications: NotificationItem[];
+  loading: boolean;
+  onMarkRead: (id: string) => void;
+}) {
+  if (loading) return <div style={{ padding: 20, color: "var(--text-muted)", fontSize: 14 }}>Carregando...</div>;
+  if (notifications.length === 0) {
+    return (
+      <div className="emptyState">
+        <div className="emptyIcon">🔔</div>
+        <strong>Sem notificações</strong>
+        <p>Notificações de novas montagens aparecerão aqui.</p>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "grid", gap: 8, maxWidth: 700 }}>
+      {notifications.map((n) => (
+        <div
+          key={n.id}
+          style={{
+            background: n.read_at ? "var(--bg-secondary)" : "var(--bg-card)",
+            border: `1px solid ${n.read_at ? "var(--border)" : "var(--brand)"}`,
+            borderRadius: 8, padding: "12px 16px",
+            opacity: n.read_at ? 0.7 : 1,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: n.read_at ? "var(--text-secondary)" : "var(--text-primary)" }}>
+                {n.title}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4, whiteSpace: "pre-line" }}>
+                {n.body}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+                {fmtDatetime(n.created_at)}
+              </div>
+            </div>
+            {!n.read_at && (
+              <button
+                className="ghostButton"
+                style={{ fontSize: 12, flexShrink: 0 }}
+                onClick={() => onMarkRead(n.id)}
+              >
+                Marcar lida
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function ProviderAppPage() {
-  const [tab, setTab] = useState<"ativas" | "historico">("ativas");
+  const [tab, setTab] = useState<"ativas" | "notificacoes" | "historico">("ativas");
   const [jobs, setJobs] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loadingNotif, setLoadingNotif] = useState(false);
   const [selected, setSelected] = useState<any>(null);
   const [historySelected, setHistorySelected] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -464,8 +539,30 @@ export function ProviderAppPage() {
     }
   };
 
+  const loadNotifications = async () => {
+    setLoadingNotif(true);
+    try {
+      const data = await api<{ rows: NotificationItem[]; unread: number }>("/provider-notifications");
+      setNotifications(data.rows);
+      setUnreadCount(data.unread);
+    } catch {
+      // silently fail — notifications are non-critical
+    } finally {
+      setLoadingNotif(false);
+    }
+  };
+
+  const markNotifRead = async (id: string) => {
+    try {
+      await api(`/provider-notifications/${id}/read`, { method: "PATCH", body: "{}" });
+      setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch { /* silently */ }
+  };
+
   useEffect(() => {
     void loadActive();
+    void loadNotifications();
     api<{ weekJobs: number; pendingBalance: number; expiringDocs: number }>("/assembly/provider/dashboard")
       .then(setDashboard)
       .catch(() => {});
@@ -542,23 +639,28 @@ export function ProviderAppPage() {
       )}
       {/* Tabs + link para histórico analítico */}
       <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: "2px solid var(--border)", marginBottom: 20 }}>
-        {(["ativas", "historico"] as const).map((t) => (
+        {([
+          { key: "ativas",       label: `Ativas (${active.length})` },
+          { key: "notificacoes", label: unreadCount > 0 ? `Notificações (${unreadCount})` : "Notificações" },
+          { key: "historico",    label: `Histórico (${history.length})` },
+        ] as const).map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.key}
+            onClick={() => setTab(t.key)}
             style={{
-              padding: "10px 24px",
+              padding: "10px 20px",
               border: "none",
               background: "transparent",
-              borderBottom: tab === t ? "2px solid var(--brand)" : "2px solid transparent",
+              borderBottom: tab === t.key ? "2px solid var(--brand)" : "2px solid transparent",
               marginBottom: -2,
-              fontWeight: tab === t ? 700 : 400,
-              color: tab === t ? "var(--brand)" : "var(--text-secondary)",
+              fontWeight: tab === t.key ? 700 : 400,
+              color: tab === t.key ? "var(--brand)" : t.key === "notificacoes" && unreadCount > 0 ? "var(--warn)" : "var(--text-secondary)",
               cursor: "pointer",
-              fontSize: 15,
+              fontSize: 14,
+              position: "relative",
             }}
           >
-            {t === "ativas" ? `Ativas (${active.length})` : `Histórico (${history.length})`}
+            {t.label}
           </button>
         ))}
         <a
@@ -628,6 +730,15 @@ export function ProviderAppPage() {
             })}
           </div>
         )
+      )}
+
+      {/* Aba: Notificações */}
+      {tab === "notificacoes" && (
+        <NotificationsPanel
+          notifications={notifications}
+          loading={loadingNotif}
+          onMarkRead={markNotifRead}
+        />
       )}
 
       {/* Aba: Histórico */}

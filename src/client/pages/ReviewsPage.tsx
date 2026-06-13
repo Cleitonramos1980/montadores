@@ -347,7 +347,21 @@ export function ReviewsPage() {
     <Page
       title="Avaliações"
       subtitle="Funil de avaliações por fase — Atendimento · Entrega · Montagem"
-      action={<SearchInput value={search} onChange={setSearch} placeholder="Buscar pedido, cliente, montador..." />}
+      action={
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <SearchInput value={search} onChange={setSearch} placeholder="Buscar pedido, cliente, montador..." />
+          <a
+            href="/montadores/eval-config"
+            style={{
+              padding: "6px 14px", fontSize: 13, fontWeight: 600,
+              color: "var(--brand)", border: "1px solid var(--brand)",
+              borderRadius: 20, textDecoration: "none", whiteSpace: "nowrap",
+            }}
+          >
+            ⚙ Configuração
+          </a>
+        </div>
+      }
     >
       {loading ? (
         <LoadingState message="Carregando avaliações..." />

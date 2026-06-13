@@ -2,11 +2,13 @@ import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { EventService } from "./EventService";
 import { AssemblyEligibilityService } from "./AssemblyEligibilityService";
+import { ProviderNotificationService } from "./ProviderNotificationService";
 
 export class SchedulingService {
   constructor(
     private readonly events = new EventService(),
     private readonly eligibility = new AssemblyEligibilityService(),
+    private readonly providerNotifications = new ProviderNotificationService(),
   ) {}
 
   async availableSlots(orderId: string) {
@@ -177,6 +179,20 @@ export class SchedulingService {
       metadata: { description: `Montagem agendada para ${date} (${period}).`, amount },
       idempotencyKey: `montagem-agendada:${order.numped}:${date}:${period}`,
     });
+
+    // Notify montador (DRY_RUN — never sends real WhatsApp per system policy)
+    const customer = await queryOne<{ name: string }>(
+      `SELECT c.NAME FROM MONT_CUSTOMERS c JOIN MONT_ORDERS o ON o.CUSTOMER_ID = c.ID WHERE o.ID = :id`,
+      { id: orderId },
+    ).catch(() => null);
+    this.providerNotifications.notifyNewJob({
+      providerId,
+      assemblyJobId: jobId,
+      numped: order.numped,
+      scheduledDate: date,
+      scheduledPeriod: period,
+      customerName: customer?.name ?? "Cliente",
+    }).catch(() => {}); // non-blocking — observability only
 
     return { scheduleId, jobId, amount };
   }
