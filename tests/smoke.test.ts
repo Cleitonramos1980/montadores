@@ -110,10 +110,11 @@ describe("smoke: authenticated endpoints (require SMOKE_TOKEN)", () => {
     expect(Array.isArray(body)).toBe(true);
   });
 
-  it.skipIf(!TOKEN)("GET /api/payments returns 200 array", async () => {
+  it.skipIf(!TOKEN)("GET /api/payments returns 200 with rows array", async () => {
     const { status, body } = await get("/payments", "admin");
     expect(status).toBe(200);
-    expect(Array.isArray(body)).toBe(true);
+    expect(body).toHaveProperty("rows");
+    expect(Array.isArray((body as Record<string, unknown>).rows)).toBe(true);
   });
 
   it.skipIf(!TOKEN)("GET /api/notifications/summary returns numeric counts", async () => {
