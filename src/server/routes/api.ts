@@ -25,7 +25,7 @@ import { ProviderNotificationService } from "../services/ProviderNotificationSer
 import { EvaluationConfigService } from "../services/EvaluationConfigService";
 import { EvaluationLinkService } from "../services/EvaluationLinkService";
 import { EvaluationResponseService } from "../services/EvaluationResponseService";
-import { queryOne, queryRows } from "../db/db";
+import { execDml, queryOne, queryRows } from "../db/db";
 
 export const api = Router();
 

@@ -89,7 +89,7 @@ export class SacService {
 
   async getById(id: string) {
     // Scalar subqueries for review data — covers any service type and works when ASSEMBLY_JOB_ID is NULL
-    const sacCase = await queryOne(
+    const sacCase = await queryOne<{ numped: string | number | null; codcli: string | number | null; [key: string]: unknown }>(
       `SELECT s.*, o.NUMPED, o.TOTAL_AMOUNT, o.CODCLI, c.NAME AS CUSTOMER_NAME, c.PHONE AS CUSTOMER_PHONE,
               COALESCE(
                 (SELECT MIN(r.SCORE) FROM MONT_CUSTOMER_REVIEWS r WHERE r.ORDER_ID = s.ORDER_ID),
