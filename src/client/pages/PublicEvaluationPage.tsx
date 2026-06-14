@@ -76,7 +76,6 @@ const PHASE_LABELS: Record<string, string> = {
 
 // ─── Shared CSS injected once ─────────────────────────────────────────────────
 const EVAL_STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap');
 @keyframes eval-spin { to { transform: rotate(360deg); } }
 @keyframes eval-fadein { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
 

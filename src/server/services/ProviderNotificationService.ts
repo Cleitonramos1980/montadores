@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
+import { features } from "../config";
 
 export type ProviderNotificationType = "NOVA_MONTAGEM_AGENDADA_MONTADOR";
 
@@ -79,12 +80,18 @@ export class ProviderNotificationService {
     const title = "Nova montagem agendada";
     const body = `Pedido ${numped} — ${customerName}\n${dateFormatted} (${periodLabel})\nAcesse o app para ver detalhes.`;
 
+    // Real channel dispatch (only when feature flags enabled)
+    // ENABLE_PROVIDER_WHATSAPP_NOTIFICATIONS=true → send via WhatsApp provider
+    // ENABLE_PROVIDER_PUSH_NOTIFICATIONS=true → send push notification
+    // Both flags false → DRY_RUN only (system policy default)
+    const isDryRun = !features.providerWhatsAppNotifications && !features.providerPushNotifications;
+
     const notificationId = uuid();
     await execDml(
       `INSERT INTO MONT_PROVIDER_NOTIFICATIONS
          (ID, PROVIDER_ID, TYPE, TITLE, BODY, ASSEMBLY_JOB_ID, NUMPED, IDEMPOTENCY_KEY, DRY_RUN, CREATED_AT)
        VALUES
-         (:id, :providerId, :type, :title, :body, :assemblyJobId, :numped, :key, 1, SYSTIMESTAMP)`,
+         (:id, :providerId, :type, :title, :body, :assemblyJobId, :numped, :key, :dryRun, SYSTIMESTAMP)`,
       {
         id: notificationId,
         providerId,
@@ -94,11 +101,38 @@ export class ProviderNotificationService {
         assemblyJobId,
         numped,
         key: idempotencyKey,
+        dryRun: isDryRun ? 1 : 0,
       },
     );
 
-    // DRY_RUN always per system policy — log only, no real WhatsApp send
-    return { status: "SIMULADO_DRY_RUN", notificationId };
+    if (isDryRun) {
+      return { status: "SIMULADO_DRY_RUN", notificationId };
+    }
+
+    // WhatsApp channel (configure WHATSAPP_API_URL + WHATSAPP_API_TOKEN to activate)
+    if (features.providerWhatsAppNotifications) {
+      const apiUrl  = process.env.WHATSAPP_API_URL;
+      const apiToken = process.env.WHATSAPP_API_TOKEN;
+      if (apiUrl && apiToken) {
+        try {
+          await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+            body: JSON.stringify({ to: phone.replace(/\D/g, ""), message: `${title}\n\n${body}` }),
+          });
+          await execDml(
+            "UPDATE MONT_PROVIDER_NOTIFICATIONS SET SENT_AT = SYSTIMESTAMP WHERE ID = :id",
+            { id: notificationId },
+          );
+        } catch (err) {
+          console.error("[ProviderNotification] WhatsApp send error:", err);
+        }
+      } else {
+        console.warn("[ProviderNotification] WHATSAPP_API_URL/TOKEN não configurados — notificação não enviada.");
+      }
+    }
+
+    return { status: "CRIADO", notificationId };
   }
 
   async listForProvider(providerId: string, unreadOnly = false): Promise<unknown[]> {

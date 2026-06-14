@@ -29,12 +29,14 @@ const flag = (key: string, defaultVal = false): boolean => {
 };
 
 export const features = {
-  deptCommissionRules: flag("ENABLE_DEPARTMENT_COMMISSION_RULES", false),
-  geoMatching:         flag("ENABLE_GEO_MATCHING", false),
-  pixPayments:         flag("ENABLE_PIX_PAYMENTS", false),
-  pwaOffline:          flag("ENABLE_PWA_OFFLINE", true),
-  reworkScoreImpact:   flag("ENABLE_REWORK_SCORE_IMPACT", false),
-  strictRbac:          flag("ENABLE_STRICT_RBAC", true),
+  deptCommissionRules:           flag("ENABLE_DEPARTMENT_COMMISSION_RULES", false),
+  geoMatching:                   flag("ENABLE_GEO_MATCHING", false),
+  pixPayments:                   flag("ENABLE_PIX_PAYMENTS", false),
+  pwaOffline:                    flag("ENABLE_PWA_OFFLINE", true),
+  reworkScoreImpact:             flag("ENABLE_REWORK_SCORE_IMPACT", false),
+  strictRbac:                    flag("ENABLE_STRICT_RBAC", true),
+  providerWhatsAppNotifications: flag("ENABLE_PROVIDER_WHATSAPP_NOTIFICATIONS", false),
+  providerPushNotifications:     flag("ENABLE_PROVIDER_PUSH_NOTIFICATIONS", false),
 };
 
 export const config = {
@@ -46,9 +48,9 @@ export const config = {
   jwtExpiresHours: Number(process.env.JWT_EXPIRES_HOURS ?? 8),
   corsOrigins,
   branding: {
-    companyName:  process.env.COMPANY_NAME  ?? "App Montadores",
-    logoUrl:      process.env.LOGO_URL      ?? "",
-    primaryColor: process.env.PRIMARY_COLOR ?? "#2e7d32",
+    companyName:  process.env.COMPANY_NAME  ?? "Rodrigues Colchões",
+    logoUrl:      process.env.LOGO_URL      ?? "/logo-rodrigues.svg",
+    primaryColor: process.env.PRIMARY_COLOR ?? "#1F2855",
     supportPhone: process.env.SUPPORT_PHONE ?? "",
   },
   oracle: {

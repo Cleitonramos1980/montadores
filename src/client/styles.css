@@ -1,3 +1,43 @@
+/* ── Mazzard ──────────────────────────────────────────────────────────────────
+   Coloque os arquivos .woff2 em public/fonts/mazzard/ para ativar a fonte.
+   Enquanto ausentes, o browser usa o fallback Arial/system-ui.
+───────────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Mazzard';
+  src: url('/fonts/mazzard/Mazzard-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mazzard';
+  src: url('/fonts/mazzard/Mazzard-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mazzard';
+  src: url('/fonts/mazzard/Mazzard-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mazzard';
+  src: url('/fonts/mazzard/Mazzard-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mazzard';
+  src: url('/fonts/mazzard/Mazzard-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --brand: #176b87;
   --brand-dark: #10576f;
