@@ -1,6 +1,6 @@
 import {
   Activity, BadgeDollarSign, Bell, CalendarDays, ClipboardList, Gauge, GitBranch, Hammer,
-  Headphones, History, Landmark, LogOut, MessageSquareText, PlugZap, Search,
+  Headphones, History, Landmark, LogOut, MapPin, MessageSquareText, PlugZap, Search,
   Shield, Smartphone, Star, Users, X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -19,6 +19,7 @@ const ALL_NAV = [
   ["Comissões",       "/montadores/comissoes",              BadgeDollarSign,   ["ADMIN","GESTOR","OPERACAO","LOGISTICA","FINANCEIRO"]],
   ["Avaliações",      "/montadores/avaliacoes",             Star,              null],
   ["Fluxo Mensagens", "/montadores/mensagens",              MessageSquareText, null],
+  ["Jornada Cliente", "/montadores/jornada-config",         MapPin,            ["ADMIN","GESTOR"]],
   ["Régua",           "/montadores/regua-fluxo",            GitBranch,         ["ADMIN","GESTOR"]],
   ["WinThor",         "/montadores/integracao-winthor",     PlugZap,           ["ADMIN","GESTOR"]],
   ["Saúde",           "/montadores/saude",                  Activity,          ["ADMIN","GESTOR"]],

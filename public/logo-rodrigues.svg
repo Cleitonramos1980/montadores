@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56" width="240" height="56">
+  <!-- R icon mark -->
+  <rect x="0" y="0" width="52" height="56" rx="8" fill="#2563EB"/>
+  <text x="8" y="44" font-family="Arial Black, Impact, sans-serif" font-weight="900" font-size="44" fill="#ffffff" letter-spacing="-2">R</text>
+  <!-- Company name -->
+  <text x="62" y="22" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="14" fill="#374151" letter-spacing="2.5">RODRIGUES</text>
+  <text x="62" y="48" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="22" fill="#2563EB" letter-spacing="0.5">COLCHÕES</text>
+</svg>

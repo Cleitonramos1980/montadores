@@ -88,24 +88,111 @@ export class SacService {
   }
 
   async getById(id: string) {
+    // Scalar subqueries for review data — covers any service type and works when ASSEMBLY_JOB_ID is NULL
     const sacCase = await queryOne(
-      `SELECT s.*, o.NUMPED, c.NAME AS CUSTOMER_NAME, c.PHONE AS CUSTOMER_PHONE,
-              r.SCORE AS REVIEW_SCORE, r.CLASSIFICATION AS REVIEW_CLASSIFICATION,
-              r.COMPLAINT_REASON AS REVIEW_COMPLAINT
+      `SELECT s.*, o.NUMPED, o.TOTAL_AMOUNT, o.CODCLI, c.NAME AS CUSTOMER_NAME, c.PHONE AS CUSTOMER_PHONE,
+              COALESCE(
+                (SELECT MIN(r.SCORE) FROM MONT_CUSTOMER_REVIEWS r WHERE r.ORDER_ID = s.ORDER_ID),
+                er.SCORE
+              ) AS REVIEW_SCORE,
+              COALESCE(
+                (SELECT r.CLASSIFICATION FROM MONT_CUSTOMER_REVIEWS r
+                 WHERE r.ORDER_ID = s.ORDER_ID ORDER BY r.SCORE ASC FETCH FIRST 1 ROW ONLY),
+                er.CLASSIFICATION
+              ) AS REVIEW_CLASSIFICATION,
+              COALESCE(
+                (SELECT r.COMPLAINT_REASON FROM MONT_CUSTOMER_REVIEWS r
+                 WHERE r.ORDER_ID = s.ORDER_ID AND r.COMPLAINT_REASON IS NOT NULL
+                 ORDER BY r.SCORE ASC FETCH FIRST 1 ROW ONLY),
+                er.EVAL_COMMENT
+              ) AS REVIEW_COMPLAINT,
+              er.PHASE AS EVAL_PHASE, er.ID AS EVAL_RESPONSE_ID
        FROM MONT_SAC_CASES s
        JOIN MONT_ORDERS o ON o.ID = s.ORDER_ID
        JOIN MONT_CUSTOMERS c ON c.ID = o.CUSTOMER_ID
-       LEFT JOIN MONT_CUSTOMER_REVIEWS r
-         ON r.ASSEMBLY_JOB_ID = s.ASSEMBLY_JOB_ID AND r.SERVICE_TYPE = 'MONTAGEM'
+       LEFT JOIN MONT_EVAL_RESPONSES er ON er.SAC_CASE_ID = s.ID
        WHERE s.ID = :id`,
       { id },
     );
     if (!sacCase) throw new Error("Caso SAC não encontrado.");
-    const logs = await queryRows(
-      "SELECT * FROM MONT_SAC_CASE_LOGS WHERE SAC_CASE_ID = :id ORDER BY CREATED_AT ASC",
-      { id },
-    );
-    return { ...sacCase, logs };
+
+    const [logs, evalAnswers, legacyReviews, orderItems, winthorOrder, winthorItems, winthorClient] = await Promise.all([
+      queryRows(
+        "SELECT * FROM MONT_SAC_CASE_LOGS WHERE SAC_CASE_ID = :id ORDER BY CREATED_AT ASC",
+        { id },
+      ),
+
+      // Per-question answers (new eval system).
+      // Primary: linked by SAC_CASE_ID. Fallback: most recent eval for same order.
+      queryRows<{ label: string; type: string; position: number; value_text: string | null; value_number: number | null }>(
+        `SELECT q.LABEL, q.TYPE, q.POSITION, a.VALUE_TEXT, a.VALUE_NUMBER
+         FROM MONT_EVAL_ANSWERS a
+         JOIN MONT_EVAL_QUESTIONS q ON q.ID = a.QUESTION_ID
+         WHERE a.RESPONSE_ID = (
+           SELECT COALESCE(
+             (SELECT er.ID FROM MONT_EVAL_RESPONSES er
+              WHERE er.SAC_CASE_ID = :id AND ROWNUM = 1),
+             (SELECT er2.ID FROM MONT_EVAL_RESPONSES er2
+              JOIN MONT_SAC_CASES sc ON sc.ORDER_ID = er2.ORDER_ID
+              WHERE sc.ID = :id2
+              ORDER BY er2.CREATED_AT DESC FETCH FIRST 1 ROW ONLY)
+           ) FROM DUAL
+         )
+         ORDER BY q.POSITION`,
+        { id, id2: id },
+      ),
+
+      // All reviews from the old system for this order (one per service phase)
+      queryRows<{ service_type: string; score: number; classification: string; review_comment: string | null; complaint_reason: string | null; created_at: string }>(
+        `SELECT r.SERVICE_TYPE, r.SCORE, r.CLASSIFICATION, r.REVIEW_COMMENT,
+                r.COMPLAINT_REASON, r.CREATED_AT
+         FROM MONT_CUSTOMER_REVIEWS r
+         JOIN MONT_SAC_CASES s ON s.ORDER_ID = r.ORDER_ID
+         WHERE s.ID = :id
+         ORDER BY r.CREATED_AT ASC`,
+        { id },
+      ),
+
+      // MONT_ORDER_ITEMS fallback (kept for cases not in WinThor)
+      queryRows<{ description: string; quantity: number; requires_assembly: number; assembly_cost: number }>(
+        `SELECT oi.DESCRIPTION, oi.QUANTITY, oi.REQUIRES_ASSEMBLY, oi.ASSEMBLY_COST
+         FROM MONT_SAC_CASES s
+         JOIN MONT_ORDER_ITEMS oi ON oi.ORDER_ID = s.ORDER_ID
+         WHERE s.ID = :id
+         ORDER BY oi.REQUIRES_ASSEMBLY DESC, oi.DESCRIPTION`,
+        { id },
+      ),
+
+      // WinThor order header: data da venda, filial, RCA
+      queryOne<{ data: Date; codfilial: number; codusur: number; nome_vendedor: string | null; vltotal: number }>(
+        `SELECT p.DATA, p.CODFILIAL, p.CODUSUR, p.VLTOTAL,
+                (SELECT u.NOME FROM PCUSUARI u WHERE u.CODUSUR = p.CODUSUR AND ROWNUM = 1) AS NOME_VENDEDOR
+         FROM PCPEDC p
+         WHERE TO_CHAR(p.NUMPED) = TO_CHAR(:numped)
+         FETCH FIRST 1 ROW ONLY`,
+        { numped: sacCase.numped },
+      ).catch(() => null),
+
+      // WinThor order items (real products from PCPEDI + PCPRODUT)
+      queryRows<{ numseq: number; codprod: string; descricao: string | null; qt: number; pvenda: number; requer_montagem: number }>(
+        `SELECT i.NUMSEQ, TO_CHAR(i.CODPROD) AS CODPROD, p.DESCRICAO, i.QT, i.PVENDA,
+                CASE WHEN NVL(p.VLMAODEOBRA, 0) > 0 THEN 1 ELSE 0 END AS REQUER_MONTAGEM
+         FROM PCPEDI i
+         LEFT JOIN PCPRODUT p ON p.CODPROD = i.CODPROD
+         WHERE TO_CHAR(i.NUMPED) = TO_CHAR(:numped)
+           AND NVL(i.POSICAO, 'A') != 'C'
+         ORDER BY i.NUMSEQ`,
+        { numped: sacCase.numped },
+      ).catch(() => []),
+
+      // WinThor client phone (PCCLIENT.TELENT)
+      queryOne<{ telent: string | null }>(
+        `SELECT TELENT FROM PCCLIENT WHERE CODCLI = :codcli`,
+        { codcli: sacCase.codcli },
+      ).catch(() => null),
+    ]);
+
+    return { ...sacCase, logs, evalAnswers, legacyReviews, orderItems, winthorOrder, winthorItems, winthorClient };
   }
 
   async assign(id: string, userId: string | undefined) {

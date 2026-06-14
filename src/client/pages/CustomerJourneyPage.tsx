@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { ActionButton, LoadingState, StatusBadge, useToast } from "../components/Ui";
+import { LoadingState, StatusBadge, useToast } from "../components/Ui";
 import { api } from "../lib/api";
 
 const JOURNEY_STEPS = [
-  { key: "PEDIDO_CRIADO", label: "Pedido\nrecebido" },
-  { key: "FATURADO", label: "Faturado" },
-  { key: "SAIU_PARA_ENTREGA", label: "Saiu para\nentrega" },
-  { key: "ENTREGA_REALIZADA", label: "Entregue" },
-  { key: "MONTAGEM_AGENDADA", label: "Montagem\nagendada" },
+  { key: "PEDIDO_CRIADO",       label: "Pedido\nrecebido" },
+  { key: "FATURADO",            label: "Faturado" },
+  { key: "SAIU_PARA_ENTREGA",   label: "Saiu para\nentrega" },
+  { key: "ENTREGA_REALIZADA",   label: "Entregue" },
+  { key: "MONTAGEM_AGENDADA",   label: "Montagem\nagendada" },
   { key: "MONTAGEM_FINALIZADA", label: "Montagem\nconcluída" },
 ];
 
@@ -28,7 +28,53 @@ type Branding = {
   supportPhone: string | null;
 };
 
-const DEFAULT_BRANDING: Branding = { companyName: "App Montadores", logoUrl: null, primaryColor: "#2e7d32", supportPhone: null };
+const DEFAULT_BRANDING: Branding = {
+  companyName: "Rodrigues Colchões",
+  logoUrl: "/logo-rodrigues.svg",
+  primaryColor: "#1F2855",
+  supportPhone: null,
+};
+
+// Design tokens — Rodrigues Colchões identity
+const C = {
+  primary:   "#1F2855",
+  action:    "#3563AD",
+  white:     "#FFFFFF",
+  bg:        "#F7F9FC",
+  border:    "#E2E8F0",
+  textMuted: "#64748B",
+  textSec:   "#475569",
+};
+
+// Mazzard with system-ui fallback; drop font files in public/fonts/mazzard/ when available
+const FONT = "'Mazzard', Arial, system-ui, -apple-system, sans-serif";
+
+function CjBtn({
+  children, onClick, variant = "primary", disabled = false, fullWidth = true,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: "primary" | "outline" | "ghost";
+  disabled?: boolean;
+  fullWidth?: boolean;
+}) {
+  const base: React.CSSProperties = {
+    fontFamily: FONT, fontWeight: 700, fontSize: 16,
+    border: "none", borderRadius: 14, minHeight: 52,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.6 : 1,
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    width: fullWidth ? "100%" : "auto",
+    transition: "opacity .15s",
+    textDecoration: "none",
+  };
+  const styles: Record<string, React.CSSProperties> = {
+    primary: { ...base, background: C.action, color: C.white, boxShadow: "0 4px 16px rgba(53,99,173,.30)" },
+    outline: { ...base, background: "transparent", color: C.action, border: `2px solid ${C.action}`, minHeight: 50 },
+    ghost:   { ...base, background: C.white, color: C.primary, border: `1.5px solid ${C.border}`, boxShadow: "0 2px 6px rgba(31,40,85,.06)", fontWeight: 600, fontSize: 15 },
+  };
+  return <button style={styles[variant]} onClick={onClick} disabled={disabled}>{children}</button>;
+}
 
 export function CustomerJourneyPage({ token }: { token: string }) {
   const [order, setOrder] = useState<any>();
@@ -40,6 +86,7 @@ export function CustomerJourneyPage({ token }: { token: string }) {
   const [showHelp, setShowHelp] = useState(false);
   const [helpReason, setHelpReason] = useState("");
   const [helpDesc, setHelpDesc] = useState("");
+  const [submittingHelp, setSubmittingHelp] = useState(false);
 
   const [showSchedule, setShowSchedule] = useState(false);
   const [slots, setSlots] = useState<any[]>([]);
@@ -82,6 +129,7 @@ export function CustomerJourneyPage({ token }: { token: string }) {
 
   async function submitHelp() {
     if (!helpReason.trim() || !helpDesc.trim()) return;
+    setSubmittingHelp(true);
     try {
       await api(`/public/sac/${token}`, {
         method: "POST",
@@ -93,29 +141,81 @@ export function CustomerJourneyPage({ token }: { token: string }) {
       setHelpDesc("");
     } catch (err) {
       toast((err as Error).message, "error");
+    } finally {
+      setSubmittingHelp(false);
     }
   }
 
-  if (loading) return <main className="publicPage"><LoadingState message="Carregando seu pedido..." /></main>;
+  // ── Loading ──────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={{ fontFamily: FONT, minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column" }}>
+        <header style={{ background: C.primary, padding: "24px 20px" }}>
+          <div style={{ maxWidth: 640, margin: "0 auto", textAlign: "center" }}>
+            <p style={{ color: "rgba(255,255,255,.65)", fontSize: 12, margin: 0, letterSpacing: "1.5px", textTransform: "uppercase" }}>
+              Jornada Pós-venda
+            </p>
+          </div>
+        </header>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <LoadingState message="Carregando seu pedido..." />
+        </div>
+      </div>
+    );
+  }
 
-  if (error) return (
-    <main className="publicPage">
-      <section className="publicHeader">
-        <span className="publicBrand">{branding.companyName}</span>
-        <h1>Ops!</h1>
-        <p>{error.includes("expirado") ? "Seu link de acompanhamento expirou." : error.includes("localizado") ? "Link não encontrado." : "Não foi possível carregar seu pedido."}</p>
-        <p style={{ color: "var(--text-muted)", fontSize: 14, marginTop: 8 }}>
-          {error.includes("expirado") ? "Solicite um novo link à empresa." : "Verifique o link recebido ou entre em contato com a empresa."}
-        </p>
-      </section>
-    </main>
-  );
+  // ── Error ────────────────────────────────────────────────────────────────
+  if (error) {
+    const isExpired = error.includes("expirado");
+    const isNotFound = error.includes("localizado");
+    return (
+      <div style={{ fontFamily: FONT, minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column" }}>
+        <header style={{ background: C.primary, padding: "28px 20px 36px" }}>
+          <div style={{ maxWidth: 640, margin: "0 auto", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: C.white, marginBottom: 6 }}>{branding.companyName}</div>
+            <p style={{ color: "rgba(255,255,255,.65)", fontSize: 12, margin: 0, letterSpacing: "1.5px", textTransform: "uppercase" }}>
+              Jornada Pós-venda
+            </p>
+          </div>
+        </header>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 20px" }}>
+          <div style={{
+            background: C.white, borderRadius: 20, padding: "32px 24px",
+            maxWidth: 380, width: "100%", textAlign: "center",
+            boxShadow: "0 4px 24px rgba(31,40,85,.10)", marginTop: -20,
+          }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: "50%",
+              background: "#FEF2F2", display: "flex", alignItems: "center",
+              justifyContent: "center", margin: "0 auto 16px", fontSize: 24,
+            }}>⚠️</div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: C.primary, margin: "0 0 8px" }}>
+              {isExpired ? "Link expirado" : isNotFound ? "Link não encontrado" : "Algo deu errado"}
+            </h2>
+            <p style={{ fontSize: 14, color: C.textSec, margin: "0 0 4px" }}>
+              {isExpired ? "Seu link de acompanhamento expirou." : isNotFound ? "Não encontramos este pedido." : "Não foi possível carregar seu pedido."}
+            </p>
+            <p style={{ fontSize: 13, color: C.textMuted, margin: 0 }}>
+              {isExpired ? "Solicite um novo link à empresa." : "Verifique o link recebido ou entre em contato com a empresa."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const hasAssembly = order?.has_assembly === 1 || order?.has_assembly === true;
+  // ── Data ─────────────────────────────────────────────────────────────────
+  const hasAssembly     = order?.has_assembly === 1 || order?.has_assembly === true;
   const alreadyReviewed = order?.reviews?.some((r: any) => r.service_type === "MONTAGEM");
-  const currentStep = getStepIndex(order?.timeline ?? []);
+  const currentStep     = getStepIndex(order?.timeline ?? []);
+  const timelineItems   = order?.timeline ?? [];
 
-  const scheduledEvent = order?.timeline?.find((t: any) =>
+  // Steps 5 e 6 (Montagem agendada / concluída) só aparecem se o pedido tem montagem
+  const visibleSteps = hasAssembly ? JOURNEY_STEPS : JOURNEY_STEPS.slice(0, 4);
+  const displayStep  = Math.min(currentStep, visibleSteps.length - 1);
+  const stepFraction = visibleSteps.length > 1 ? displayStep / (visibleSteps.length - 1) : 1;
+
+  const scheduledEvent = timelineItems.find((t: any) =>
     (t.event_type ?? t.type ?? "").toUpperCase() === "MONTAGEM_AGENDADA",
   );
   const scheduledDate = scheduledEvent?.metadata?.date ?? scheduledEvent?.date ?? null;
@@ -123,194 +223,340 @@ export function CustomerJourneyPage({ token }: { token: string }) {
   const nextStepMsg: string | null = !hasAssembly ? null
     : currentStep < 3 ? "Aguardamos a confirmação da entrega para agendar a montagem."
     : currentStep === 3 ? "Seu produto foi entregue! Agende agora a montagem."
-    : currentStep === 4 ? scheduledDate ? `Montagem agendada para ${new Date(scheduledDate + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}.` : "Montagem agendada — aguarde o contato da equipe."
+    : currentStep === 4 ? scheduledDate
+      ? `Montagem agendada para ${new Date(scheduledDate + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}.`
+      : "Montagem agendada — aguarde o contato da equipe."
     : null;
 
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <main className="publicPage" style={{ "--brand": branding.primaryColor } as React.CSSProperties}>
-      <section className="publicHeader">
-        {branding.logoUrl
-          ? <img src={branding.logoUrl} alt={branding.companyName} style={{ height: 40, objectFit: "contain", marginBottom: 8, display: "block" }} />
-          : <span className="publicBrand" style={{ color: branding.primaryColor }}>{branding.companyName}</span>
-        }
-        <h1>Pedido {order.numped}</h1>
-        <p style={{ color: "var(--text-muted)", marginBottom: 8 }}>{order.customer_name}</p>
-        <StatusBadge value={order.current_status} />
-      </section>
+    <div style={{ fontFamily: FONT, minHeight: "100vh", background: C.bg, color: C.primary }}>
 
-      {/* Next step callout */}
-      {nextStepMsg && (
+      {/* ── HEADER ─────────────────────────────────────────────────────── */}
+      <header style={{ background: C.primary, padding: "28px 20px 40px" }}>
+        <div style={{ maxWidth: 640, margin: "0 auto", textAlign: "center" }}>
+          {branding.logoUrl ? (
+            <img
+              src={branding.logoUrl}
+              alt={branding.companyName}
+              style={{ height: 44, objectFit: "contain", display: "block", margin: "0 auto 10px" }}
+            />
+          ) : (
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.white, marginBottom: 6, letterSpacing: "-0.3px" }}>
+              {branding.companyName}
+            </div>
+          )}
+          <p style={{
+            color: "rgba(255,255,255,.6)", fontSize: 11, margin: 0,
+            letterSpacing: "2px", textTransform: "uppercase", fontWeight: 500,
+          }}>
+            Jornada Pós-venda
+          </p>
+        </div>
+      </header>
+
+      {/* ── CONTENT ────────────────────────────────────────────────────── */}
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px 40px" }}>
+
+        {/* Order identity card — overlaps header bottom */}
         <div style={{
-          background: currentStep === 3 ? "var(--brand)" : "var(--bg-secondary)",
-          color: currentStep === 3 ? "#fff" : "var(--text)",
-          borderRadius: 12, padding: "14px 18px", marginBottom: 16,
-          fontSize: 15, fontWeight: 500, lineHeight: 1.4,
-          border: currentStep !== 3 ? "1px solid var(--border)" : "none",
+          background: C.white, borderRadius: 20, padding: "18px 20px 16px",
+          marginTop: -24, marginBottom: 14,
+          boxShadow: "0 4px 24px rgba(31,40,85,.14)",
         }}>
-          {currentStep === 3 ? "🎉 " : "ℹ️ "}{nextStepMsg}
-        </div>
-      )}
-
-      {/* Step progress */}
-      <div className="stepProgress">
-        {JOURNEY_STEPS.map((step, i) => (
-          <div
-            key={step.key}
-            className={`step${i < currentStep ? " done" : i === currentStep ? " current" : ""}`}
-          >
-            <div className="stepDot">{i < currentStep ? "✓" : i + 1}</div>
-            <span className="stepLabel">{step.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Main actions — above timeline for mobile scanability */}
-      {!showSchedule && !showHelp && (
-        <section className="panel spacedPanel actionsBig">
-          {hasAssembly && currentStep === 3 && (
-            <ActionButton onClick={loadSlots} loadingLabel="Buscando horários...">
-              📅 Agendar minha montagem
-            </ActionButton>
-          )}
-          {hasAssembly && currentStep > 3 && currentStep < 5 && !alreadyReviewed && (
-            <ActionButton onClick={loadSlots} loadingLabel="Buscando horários..." className="ghostButton">
-              📅 Remarcar montagem
-            </ActionButton>
-          )}
-          {hasAssembly && !alreadyReviewed && currentStep >= 5 && (
-            <a className="ghostButton" href={`/montadores/avaliacao/${token}`} style={{ justifyContent: "center", minHeight: 50, fontSize: 16 }}>
-              ⭐ Avaliar minha montagem
-            </a>
-          )}
-          {alreadyReviewed && (
-            <div className="badge badge--aprovado" style={{ textAlign: "center", padding: "14px", fontSize: 14, borderRadius: 10 }}>
-              ✓ Avaliação enviada — Obrigado pelo seu feedback!
-            </div>
-          )}
-          <button className="dangerButton" style={{ fontSize: 16, minHeight: 52 }} onClick={() => setShowHelp(true)}>
-            ✋ Preciso de ajuda
-          </button>
-        </section>
-      )}
-
-      {/* Timeline */}
-      <section className="panel spacedPanel">
-        <h2 style={{ fontSize: 15, marginBottom: 12 }}>Histórico do pedido</h2>
-        <div className="timeline">
-          {order.timeline?.length === 0 && <p style={{ color: "var(--text-muted)" }}>Nenhum evento registrado ainda.</p>}
-          {order.timeline?.map((item: any) => (
-            <div className="timelineItem" key={item.id}>
-              <span />
-              <div>
-                <strong style={{ fontSize: 14 }}>{item.title}</strong>
-                <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "2px 0 0" }}>{item.description}</p>
-                <small style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  {new Date(item.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                </small>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: C.primary, marginBottom: 3, letterSpacing: "-0.2px" }}>
+                Pedido #{order.numped}
               </div>
+              <div style={{ fontSize: 14, color: C.textSec }}>{order.customer_name}</div>
             </div>
-          ))}
+            <StatusBadge value={order.current_status} />
+          </div>
         </div>
-      </section>
 
-      {/* Products */}
-      {order.items?.length > 0 && (
-        <section className="panel spacedPanel">
-          <h2 style={{ fontSize: 15, marginBottom: 12 }}>Seus produtos</h2>
-          {order.items.map((item: any) => (
-            <div key={item.id} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "10px 0", borderBottom: "1px solid var(--border)",
-            }}>
-              <span style={{ fontSize: 14 }}><strong>{item.quantity}x</strong> {item.description}</span>
-              {item.requires_assembly && <span className="badge badge--em-analise" style={{ whiteSpace: "nowrap", marginLeft: 8 }}>Montagem</span>}
-            </div>
-          ))}
-        </section>
-      )}
+        {/* Next step CTA */}
+        {nextStepMsg && (
+          <div style={{
+            background: currentStep === 3
+              ? `linear-gradient(135deg, ${C.primary} 0%, ${C.action} 100%)`
+              : C.white,
+            color: currentStep === 3 ? C.white : C.primary,
+            borderRadius: 16, padding: "16px 20px", marginBottom: 14,
+            fontSize: 15, fontWeight: 500, lineHeight: 1.5,
+            border: currentStep !== 3 ? `1px solid ${C.border}` : "none",
+            boxShadow: currentStep === 3
+              ? "0 4px 20px rgba(53,99,173,.28)"
+              : "0 2px 8px rgba(31,40,85,.06)",
+          }}>
+            <span style={{ marginRight: 8 }}>{currentStep === 3 ? "🎉" : "ℹ️"}</span>
+            {nextStepMsg}
+          </div>
+        )}
 
-      {/* Schedule panel */}
-      {showSchedule && (
-        <section className="panel spacedPanel">
-          <h2 style={{ fontSize: 16 }}>Escolha um horário</h2>
-          <p style={{ color: "var(--text-muted)", fontSize: 14, marginBottom: 14 }}>Selecione o dia e período de sua preferência:</p>
-          {slotsLoading && <LoadingState message="Buscando disponibilidade..." />}
-          {!slotsLoading && slots.length === 0 && (
-            <p style={{ color: "var(--text-muted)", padding: "12px 0" }}>
-              Nenhum horário disponível no momento. Entre em contato com a loja.
-            </p>
-          )}
-          <div className="slotGrid">
-            {slots.map((slot) => (
-              <button
-                key={`${slot.providerId}-${slot.date}-${slot.period}`}
-                className="slot"
-                style={{ minHeight: 80, fontSize: 15 }}
-                onClick={() => scheduleSlot(slot)}
+        {/* Step progress */}
+        <div style={{
+          background: C.white, borderRadius: 16,
+          padding: "20px 10px 16px", marginBottom: 14,
+          boxShadow: "0 2px 8px rgba(31,40,85,.06)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative" }}>
+            {/* Connector line */}
+            <div style={{
+              position: "absolute", top: 13, left: "8%", right: "8%", height: 2, zIndex: 0,
+              background: `linear-gradient(to right, ${C.primary} ${stepFraction * 100}%, #E2E8F0 ${stepFraction * 100}%)`,
+            }} />
+            {visibleSteps.map((step, i) => {
+              const isDone    = i < displayStep;
+              const isCurrent = i === displayStep;
+              return (
+                <div key={step.key} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, position: "relative", zIndex: 1 }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: isDone ? C.primary : isCurrent ? C.action : "#E2E8F0",
+                    color: isDone || isCurrent ? C.white : C.textMuted,
+                    fontSize: 11, fontWeight: 700,
+                    boxShadow: isCurrent ? `0 0 0 4px rgba(53,99,173,.18)` : "none",
+                  }}>
+                    {isDone ? "✓" : i + 1}
+                  </div>
+                  <div style={{
+                    fontSize: 9, textAlign: "center", marginTop: 5,
+                    color: isDone || isCurrent ? C.primary : C.textMuted,
+                    fontWeight: isDone || isCurrent ? 600 : 400,
+                    lineHeight: 1.25, whiteSpace: "pre-line",
+                  }}>
+                    {step.label}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Main actions */}
+        {!showSchedule && !showHelp && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+            {hasAssembly && currentStep === 3 && (
+              <CjBtn onClick={loadSlots} disabled={slotsLoading}>
+                {slotsLoading ? "Buscando horários..." : "📅 Agendar minha montagem"}
+              </CjBtn>
+            )}
+            {hasAssembly && currentStep > 3 && currentStep < 5 && !alreadyReviewed && (
+              <CjBtn onClick={loadSlots} variant="outline" disabled={slotsLoading}>
+                {slotsLoading ? "Buscando horários..." : "📅 Remarcar montagem"}
+              </CjBtn>
+            )}
+            {hasAssembly && !alreadyReviewed && currentStep >= 5 && (
+              <a
+                href={`/montadores/avaliacao/${token}`}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  background: C.action, color: C.white, textDecoration: "none",
+                  borderRadius: 14, minHeight: 52, fontSize: 16, fontWeight: 700,
+                  boxShadow: "0 4px 16px rgba(53,99,173,.30)",
+                }}
               >
-                <strong style={{ fontSize: 16 }}>
-                  {new Date(slot.date + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" })}
-                </strong>
-                <span style={{ fontSize: 15 }}>{slot.period === "MANHA" ? "🌅 Manhã" : "🌇 Tarde"}</span>
-                <small style={{ fontSize: 12, color: "var(--text-muted)" }}>{slot.providerName}</small>
-              </button>
+                ⭐ Avaliar minha montagem
+              </a>
+            )}
+            {alreadyReviewed && (
+              <div style={{
+                background: "#F0FDF4", border: "1px solid #BBF7D0",
+                color: "#15803D", borderRadius: 14, padding: "14px 20px",
+                fontSize: 14, fontWeight: 500, textAlign: "center",
+              }}>
+                ✓ Avaliação enviada — Obrigado pelo seu feedback!
+              </div>
+            )}
+            <CjBtn onClick={() => setShowHelp(true)} variant="ghost">
+              ✋ Preciso de ajuda
+            </CjBtn>
+          </div>
+        )}
+
+        {/* Timeline */}
+        <div style={{
+          background: C.white, borderRadius: 16, padding: "20px 20px 12px",
+          marginBottom: 14, boxShadow: "0 2px 8px rgba(31,40,85,.06)",
+        }}>
+          <h2 style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, margin: "0 0 16px", textTransform: "uppercase", letterSpacing: "1.5px" }}>
+            Histórico do pedido
+          </h2>
+          {timelineItems.length === 0 && (
+            <p style={{ fontSize: 14, color: C.textMuted, margin: 0 }}>Nenhum evento registrado ainda.</p>
+          )}
+          {timelineItems.map((item: any, idx: number) => {
+            const isLatest = idx === timelineItems.length - 1;
+            return (
+              <div key={item.id} style={{ display: "flex", gap: 14, paddingBottom: 16, position: "relative" }}>
+                {/* vertical connector */}
+                {idx < timelineItems.length - 1 && (
+                  <div style={{
+                    position: "absolute", left: 9, top: 22, bottom: 0,
+                    width: 2, background: "#E2E8F0", zIndex: 0,
+                  }} />
+                )}
+                {/* dot */}
+                <div style={{
+                  width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 2,
+                  background: isLatest ? C.action : C.primary,
+                  boxShadow: isLatest ? `0 0 0 4px rgba(53,99,173,.14)` : "none",
+                  position: "relative", zIndex: 1,
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.primary, marginBottom: 2 }}>{item.title}</div>
+                  <p style={{ fontSize: 13, color: C.textSec, margin: "0 0 3px" }}>{item.description}</p>
+                  <span style={{ fontSize: 11, color: C.textMuted }}>
+                    {new Date(item.created_at).toLocaleString("pt-BR", {
+                      day: "2-digit", month: "2-digit", year: "numeric",
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Products */}
+        {order.items?.length > 0 && (
+          <div style={{
+            background: C.white, borderRadius: 16, padding: "20px 20px 12px",
+            marginBottom: 14, boxShadow: "0 2px 8px rgba(31,40,85,.06)",
+          }}>
+            <h2 style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, margin: "0 0 16px", textTransform: "uppercase", letterSpacing: "1.5px" }}>
+              Seus produtos
+            </h2>
+            {order.items.map((item: any) => (
+              <div key={item.id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 0", borderBottom: `1px solid ${C.border}`,
+              }}>
+                <span style={{ fontSize: 14, color: C.primary }}>
+                  <strong style={{ color: C.action }}>{item.quantity}x</strong>{" "}{item.description}
+                </span>
+                {item.requires_assembly && (
+                  <span style={{
+                    background: "#EFF6FF", color: C.action,
+                    fontSize: 10, fontWeight: 700,
+                    padding: "3px 10px", borderRadius: 20,
+                    whiteSpace: "nowrap", marginLeft: 10,
+                    border: `1px solid rgba(53,99,173,.20)`,
+                  }}>
+                    Montagem
+                  </span>
+                )}
+              </div>
             ))}
           </div>
-          <div className="actionsBig">
-            <button className="ghostButton" style={{ minHeight: 50, fontSize: 16 }} onClick={() => setShowSchedule(false)}>← Voltar</button>
-          </div>
-        </section>
-      )}
+        )}
 
-      {/* Help panel */}
-      {showHelp && (
-        <section className="panel spacedPanel">
-          <h2 style={{ fontSize: 16 }}>Preciso de ajuda</h2>
-          <p style={{ color: "var(--text-muted)", fontSize: 14, marginBottom: 16 }}>
-            Descreva o que está acontecendo e nossa equipe entrará em contato em breve.
-          </p>
-          <label style={{ display: "grid", gap: 6, fontSize: 14, color: "var(--text-secondary)", marginBottom: 14 }}>
-            Qual é o problema?
-            <input
-              value={helpReason}
-              onChange={(e) => setHelpReason(e.target.value)}
-              placeholder="Ex: Produto com defeito, montagem incorreta..."
-              style={{ fontSize: 16 }}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 6, fontSize: 14, color: "var(--text-secondary)", marginBottom: 18 }}>
-            Detalhe o que aconteceu
-            <textarea
-              value={helpDesc}
-              onChange={(e) => setHelpDesc(e.target.value)}
-              placeholder="Quanto mais detalhes, mais rápido poderemos ajudar."
-              style={{ fontSize: 16, minHeight: 120 }}
-            />
-          </label>
-          <div className="actionsBig">
-            <ActionButton
-              onClick={submitHelp}
-              className="dangerButton"
-              disabled={!helpReason.trim() || !helpDesc.trim()}
-              loadingLabel="Enviando..."
-            >
-              Enviar solicitação
-            </ActionButton>
-            <button className="ghostButton" style={{ minHeight: 52, fontSize: 16 }} onClick={() => setShowHelp(false)}>Cancelar</button>
+        {/* Schedule panel */}
+        {showSchedule && (
+          <div style={{
+            background: C.white, borderRadius: 16, padding: "20px",
+            marginBottom: 14, boxShadow: "0 2px 8px rgba(31,40,85,.06)",
+          }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: C.primary, margin: "0 0 6px" }}>Escolha um horário</h2>
+            <p style={{ color: C.textMuted, fontSize: 14, margin: "0 0 16px" }}>
+              Selecione o dia e período de sua preferência:
+            </p>
+            {slotsLoading && <LoadingState message="Buscando disponibilidade..." />}
+            {!slotsLoading && slots.length === 0 && (
+              <p style={{ color: C.textMuted, padding: "12px 0", fontSize: 14 }}>
+                Nenhum horário disponível no momento. Entre em contato com a loja.
+              </p>
+            )}
+            {!slotsLoading && slots.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                {slots.map((slot) => (
+                  <button
+                    key={`${slot.providerId}-${slot.date}-${slot.period}`}
+                    onClick={() => scheduleSlot(slot)}
+                    style={{
+                      background: C.bg, border: `2px solid ${C.border}`,
+                      borderRadius: 14, padding: "14px 10px", minHeight: 80,
+                      cursor: "pointer", display: "flex", flexDirection: "column",
+                      alignItems: "center", justifyContent: "center", gap: 4,
+                      fontFamily: FONT, color: C.primary,
+                    }}
+                  >
+                    <strong style={{ fontSize: 15 }}>
+                      {new Date(slot.date + "T12:00:00").toLocaleDateString("pt-BR", {
+                        weekday: "short", day: "2-digit", month: "short",
+                      })}
+                    </strong>
+                    <span style={{ fontSize: 14 }}>{slot.period === "MANHA" ? "🌅 Manhã" : "🌇 Tarde"}</span>
+                    <small style={{ fontSize: 11, color: C.textMuted }}>{slot.providerName}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+            <CjBtn onClick={() => setShowSchedule(false)} variant="ghost">
+              ← Voltar
+            </CjBtn>
           </div>
-        </section>
-      )}
-      {/* Footer com telefone de suporte */}
-      {branding.supportPhone && (
-        <section style={{ marginTop: 24, textAlign: "center", padding: "16px 0", borderTop: "1px solid var(--border)" }}>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
-            Precisa de ajuda? Ligue para{" "}
-            <a href={`tel:${branding.supportPhone.replace(/\D/g, "")}`} style={{ color: branding.primaryColor, fontWeight: 700 }}>
-              {branding.supportPhone}
-            </a>
-          </p>
-        </section>
-      )}
-    </main>
+        )}
+
+        {/* Help panel */}
+        {showHelp && (
+          <div style={{
+            background: C.white, borderRadius: 16, padding: "20px",
+            marginBottom: 14, boxShadow: "0 2px 8px rgba(31,40,85,.06)",
+          }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: C.primary, margin: "0 0 6px" }}>Preciso de ajuda</h2>
+            <p style={{ color: C.textMuted, fontSize: 14, margin: "0 0 18px" }}>
+              Descreva o que está acontecendo e nossa equipe entrará em contato em breve.
+            </p>
+            <label style={{ display: "grid", gap: 6, fontSize: 14, color: C.textSec, marginBottom: 14 }}>
+              Qual é o problema?
+              <input
+                value={helpReason}
+                onChange={(e) => setHelpReason(e.target.value)}
+                placeholder="Ex: Produto com defeito, montagem incorreta..."
+                style={{ fontSize: 16 }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 14, color: C.textSec, marginBottom: 18 }}>
+              Detalhe o que aconteceu
+              <textarea
+                value={helpDesc}
+                onChange={(e) => setHelpDesc(e.target.value)}
+                placeholder="Quanto mais detalhes, mais rápido poderemos ajudar."
+                style={{ fontSize: 16, minHeight: 120 }}
+              />
+            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <CjBtn
+                onClick={submitHelp}
+                disabled={submittingHelp || !helpReason.trim() || !helpDesc.trim()}
+              >
+                {submittingHelp ? "Enviando..." : "Enviar solicitação"}
+              </CjBtn>
+              <CjBtn onClick={() => setShowHelp(false)} variant="ghost">
+                Cancelar
+              </CjBtn>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        {branding.supportPhone && (
+          <div style={{ textAlign: "center", paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: 13, color: C.textMuted, margin: 0 }}>
+              Precisa de ajuda? Ligue para{" "}
+              <a
+                href={`tel:${branding.supportPhone.replace(/\D/g, "")}`}
+                style={{ color: C.action, fontWeight: 700, textDecoration: "none" }}
+              >
+                {branding.supportPhone}
+              </a>
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

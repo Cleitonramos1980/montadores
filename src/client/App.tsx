@@ -3,6 +3,7 @@ import { ApprovalPage } from "./pages/ApprovalPage";
 import { AuditPage } from "./pages/AuditPage";
 import { SystemHealthPage } from "./pages/SystemHealthPage";
 import { CustomerJourneyPage } from "./pages/CustomerJourneyPage";
+import { JourneyConfigPage } from "./pages/JourneyConfigPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { FinancePage } from "./pages/FinancePage";
 import { IntegrationPage } from "./pages/IntegrationPage";
@@ -79,6 +80,7 @@ export function App() {
   if (path === "/montadores/eval-config") page = canAccessAuditoria ? <EvaluationConfigPage /> : <Forbidden />;
   if (path === "/montadores/mensagens") page = <FluxoMensagensPage />;
   if (path === "/montadores/mensagens-templates") page = hasRole("ADMIN", "GESTOR") ? <MessageTemplatesPage /> : <Forbidden />;
+  if (path === "/montadores/jornada-config") page = hasRole("ADMIN", "GESTOR") ? <JourneyConfigPage /> : <Forbidden />;
   if (path === "/montadores/regua-fluxo") page = hasRole("ADMIN", "GESTOR") ? <FlowRulerPage /> : <Forbidden />;
   if (path === "/montadores/integracao-winthor") page = hasRole("ADMIN", "GESTOR") ? <IntegrationPage /> : <Forbidden />;
   if (path === "/montadores/app") page = <ProviderAppPage />;

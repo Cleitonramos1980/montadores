@@ -109,14 +109,18 @@ api.post("/auth/login", asyncRoute(async (req, res) => {
   res.json(await auth.login(body.email, body.password));
 }));
 
-api.get("/public/branding", (_req, res) => {
+api.get("/public/branding", asyncRoute(async (_req, res) => {
+  const row = await queryOne<{ config_value: string }>(
+    "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'branding'",
+  ).catch(() => null);
+  const db = row?.config_value ? JSON.parse(row.config_value) : {};
   res.json({
-    companyName:  config.branding.companyName,
-    logoUrl:      config.branding.logoUrl || null,
-    primaryColor: config.branding.primaryColor,
-    supportPhone: config.branding.supportPhone || null,
+    companyName:  db.companyName  ?? config.branding.companyName,
+    logoUrl:      db.logoUrl      ?? (config.branding.logoUrl   || null),
+    primaryColor: db.primaryColor ?? config.branding.primaryColor,
+    supportPhone: db.supportPhone ?? (config.branding.supportPhone || null),
   });
-});
+}));
 
 api.get("/public/journey/:token", asyncRoute(async (req, res) => {
   const token = await tokens.validate(param(req.params.token), "JORNADA_CLIENTE");
@@ -227,6 +231,38 @@ api.use(authMiddleware);
 
 // Current user
 api.get("/auth/me", asyncRoute(async (req, res) => res.json(await auth.me(req.user!.sub))));
+
+// ── Branding / Jornada do Cliente ─────────────────────────────────────────────
+api.get("/settings/branding", requireRole("ADMIN", "GESTOR"), asyncRoute(async (_req, res) => {
+  const row = await queryOne<{ config_value: string }>(
+    "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'branding'",
+  ).catch(() => null);
+  const db = row?.config_value ? JSON.parse(row.config_value) : {};
+  res.json({
+    companyName:  db.companyName  ?? config.branding.companyName,
+    logoUrl:      db.logoUrl      ?? (config.branding.logoUrl   || null),
+    primaryColor: db.primaryColor ?? config.branding.primaryColor,
+    supportPhone: db.supportPhone ?? (config.branding.supportPhone || null),
+  });
+}));
+
+api.put("/settings/branding", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
+  const { companyName, logoUrl, primaryColor, supportPhone } = req.body as Record<string, string>;
+  const json = JSON.stringify({
+    companyName:  companyName  || config.branding.companyName,
+    logoUrl:      logoUrl      || null,
+    primaryColor: primaryColor || config.branding.primaryColor,
+    supportPhone: supportPhone || null,
+  });
+  await execDml(
+    `MERGE INTO MONT_SYNC_CONFIG tgt USING DUAL ON (tgt.CONFIG_KEY = 'branding')
+     WHEN MATCHED THEN UPDATE SET CONFIG_VALUE = :val, ATUALIZADO_EM = SYSTIMESTAMP
+     WHEN NOT MATCHED THEN INSERT (CONFIG_KEY, CONFIG_VALUE, ATUALIZADO_EM)
+       VALUES ('branding', :val, SYSTIMESTAMP)`,
+    { val: json },
+  );
+  res.json({ ok: true });
+}));
 
 // File upload
 api.post("/upload", upload.single("file"), (req, res) => {
@@ -569,7 +605,8 @@ api.put("/message-templates/:eventType", requireRole("ADMIN", "GESTOR"), asyncRo
 }));
 
 // Flow ruler
-api.get("/flow-ruler", asyncRoute(async (_req, res) => res.json(await flow.ruler())));
+api.get("/flow-ruler/stats", asyncRoute(async (_req, res) => res.json(await flow.rulerStats())));
+api.get("/flow-ruler",       asyncRoute(async (_req, res) => res.json(await flow.ruler())));
 
 // SAC
 api.get("/sac", asyncRoute(async (req, res) => {
