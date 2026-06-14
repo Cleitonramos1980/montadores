@@ -841,6 +841,8 @@ const NEW_COLUMNS: ColumnDef[] = [
   { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_TOTAL_ITEM", ddl: "NUMBER(14,4)" },
   { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UNIDADE", ddl: "VARCHAR2(20)" },
   { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UPDATED_AT", ddl: "TIMESTAMP DEFAULT SYSTIMESTAMP" },
+  // SENT_AT para notificações WhatsApp (coluna adicionada depois da criação inicial da tabela)
+  { table: "MONT_PROVIDER_NOTIFICATIONS", column: "SENT_AT", ddl: "TIMESTAMP" },
   // Vigência de regras de comissão
   { table: "MONT_PRODUCT_COMMISSIONS", column: "VIGENCIA_INICIO", ddl: "DATE" },
   { table: "MONT_PRODUCT_COMMISSIONS", column: "VIGENCIA_FIM", ddl: "DATE" },
@@ -907,6 +909,7 @@ const INDEXES: IndexDef[] = [
   // Provider notifications
   { name: "IDX_MONT_PROVNOTIF_PROV",   table: "MONT_PROVIDER_NOTIFICATIONS", columns: "PROVIDER_ID" },
   { name: "IDX_MONT_PROVNOTIF_JOB",    table: "MONT_PROVIDER_NOTIFICATIONS", columns: "ASSEMBLY_JOB_ID" },
+  { name: "IDX_MONT_PROVNOTIF_SENT",   table: "MONT_PROVIDER_NOTIFICATIONS", columns: "SENT_AT" },
   // Eval configs + questions
   { name: "IDX_MONT_EVALQ_CONFIG",     table: "MONT_EVAL_QUESTIONS", columns: "CONFIG_ID, POSITION" },
   // Eval links

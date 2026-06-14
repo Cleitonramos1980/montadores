@@ -1704,7 +1704,6 @@ api.patch("/provider-notifications/:id/read", asyncRoute(async (req, res) => {
 
 const evalConfigSvc = new EvaluationConfigService();
 const evalLinkSvc   = new EvaluationLinkService();
-const evalRespSvc   = new EvaluationResponseService();
 
 const evalAdminRoles = requireRole("ADMIN", "GESTOR");
 

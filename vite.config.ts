@@ -9,5 +9,17 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:3333"
     }
+  },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-xlsx": ["xlsx"],
+          "vendor-lucide": ["lucide-react"],
+        }
+      }
+    }
   }
 });
