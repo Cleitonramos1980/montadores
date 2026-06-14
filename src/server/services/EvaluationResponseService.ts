@@ -2,6 +2,7 @@ import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { EvaluationLinkService } from "./EvaluationLinkService";
 import { SacService } from "./SacService";
+import { WinthorSyncService } from "./WinthorSyncService";
 
 export type EvalAnswer = {
   questionId: string;
@@ -29,6 +30,7 @@ export class EvaluationResponseService {
   constructor(
     private readonly links = new EvaluationLinkService(),
     private readonly sacService = new SacService(),
+    private readonly winthorSync = new WinthorSyncService(),
   ) {}
 
   async submit(token: string, submission: EvalSubmission): Promise<EvalResponseResult> {
@@ -61,6 +63,28 @@ export class EvaluationResponseService {
     const classification: "POSITIVA" | "NEUTRA" | "NEGATIVA" =
       score >= 9 ? "POSITIVA" : score >= 7 ? "NEUTRA" : "NEGATIVA";
 
+    // Resolve MONT_ORDERS record BEFORE INSERT so ORDER_ID is populated correctly.
+    // If the order isn't synced yet, trigger WinThor sync on the fly.
+    let montOrder: { id: string; codcli: string } | null = null;
+    if (linkInfo.numped) {
+      montOrder = await queryOne<{ id: string; codcli: string }>(
+        "SELECT ID, CODCLI FROM MONT_ORDERS WHERE NUMPED = :numped",
+        { numped: linkInfo.numped },
+      ).catch(() => null);
+
+      if (!montOrder) {
+        try {
+          await this.winthorSync.syncOrder(linkInfo.numped);
+          montOrder = await queryOne<{ id: string; codcli: string }>(
+            "SELECT ID, CODCLI FROM MONT_ORDERS WHERE NUMPED = :numped",
+            { numped: linkInfo.numped },
+          ).catch(() => null);
+        } catch {
+          // Sync failed — eval is still recorded but SAC creation will be skipped
+        }
+      }
+    }
+
     const responseId = uuid();
     await execDml(
       `INSERT INTO MONT_EVAL_RESPONSES
@@ -73,10 +97,10 @@ export class EvaluationResponseService {
         id: responseId,
         linkId: linkInfo.linkId,
         configId: linkInfo.configId,
-        orderId: null,
+        orderId: montOrder?.id ?? null,
         assemblyJobId: null,
         numped: linkInfo.numped ?? null,
-        codcli: null,
+        codcli: montOrder?.codcli ?? null,
         phase: linkInfo.phase,
         score,
         classification,
@@ -110,49 +134,39 @@ export class EvaluationResponseService {
     let sacCaseId: string | undefined;
     let paymentImpact: string | undefined;
 
-    // SAC trigger on negative classification
-    if (classification === "NEGATIVA" && linkInfo.numped) {
+    // SAC trigger on negative classification — requires order in MONT_ORDERS
+    if (classification === "NEGATIVA" && montOrder) {
       try {
-        const order = await queryOne<{ id: string; codcli: string }>(
-          "SELECT ID, CODCLI FROM MONT_ORDERS WHERE NUMPED = :numped",
-          { numped: linkInfo.numped },
+        const sacResult = await this.sacService.open(
+          montOrder.id,
+          `Avaliação negativa — fase ${linkInfo.phase}`,
+          [
+            `Score: ${score}/10`,
+            submission.comment ? `Comentário: ${submission.comment}` : null,
+          ].filter(Boolean).join("\n"),
         );
-        if (order) {
-          const sacResult = await this.sacService.open(
-            order.id,
-            `Avaliação negativa — fase ${linkInfo.phase}`,
-            [
-              `Score: ${score}/10`,
-              submission.comment ? `Comentário: ${submission.comment}` : null,
-            ].filter(Boolean).join("\n"),
-          );
-          sacCaseId = (sacResult as any)?.id;
-          sacTriggered = true;
+        sacCaseId = sacResult?.id;
+        sacTriggered = true;
 
-          // Record SAC reference in response
+        await execDml(
+          "UPDATE MONT_EVAL_RESPONSES SET SAC_TRIGGERED = 1, SAC_CASE_ID = :sacId WHERE ID = :id",
+          { sacId: sacCaseId ?? null, id: responseId },
+        );
+
+        // Block assembler payment if montagem phase
+        if (linkInfo.phase === "MONTAGEM") {
           await execDml(
-            "UPDATE MONT_EVAL_RESPONSES SET SAC_TRIGGERED = 1, SAC_CASE_ID = :sacId WHERE ID = :id",
-            { sacId: sacCaseId ?? null, id: responseId },
+            `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'BLOQUEADO', BLOCKED_REASON = :reason, UPDATED_AT = SYSTIMESTAMP
+             WHERE ASSEMBLY_JOB_ID IN (
+               SELECT ID FROM MONT_ASSEMBLY_JOBS WHERE ORDER_ID = :orderId
+             ) AND STATUS NOT IN ('PAGO', 'CANCELADO')`,
+            { reason: `Avaliação negativa (${score}/10). SAC aberto.`, orderId: montOrder.id },
           );
-
-          // Block payment if assembly phase
-          if (linkInfo.phase === "MONTAGEM") {
-            await execDml(
-              `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'BLOQUEADO', BLOCKED_REASON = :reason, UPDATED_AT = SYSTIMESTAMP
-               WHERE ASSEMBLY_JOB_ID IN (
-                 SELECT ID FROM MONT_ASSEMBLY_JOBS WHERE ORDER_ID = :orderId
-               ) AND STATUS NOT IN ('PAGO', 'CANCELADO')`,
-              {
-                reason: `Avaliação negativa (${score}/10). SAC aberto.`,
-                orderId: order.id,
-              },
-            );
-            paymentImpact = "BLOQUEADO";
-            await execDml(
-              "UPDATE MONT_EVAL_RESPONSES SET PAYMENT_IMPACT = 'BLOQUEADO' WHERE ID = :id",
-              { id: responseId },
-            );
-          }
+          paymentImpact = "BLOQUEADO";
+          await execDml(
+            "UPDATE MONT_EVAL_RESPONSES SET PAYMENT_IMPACT = 'BLOQUEADO' WHERE ID = :id",
+            { id: responseId },
+          );
         }
       } catch {
         // SAC failure doesn't block evaluation recording
@@ -160,26 +174,20 @@ export class EvaluationResponseService {
     }
 
     // Auto-release payment on positive (assembly phase only)
-    if (classification === "POSITIVA" && linkInfo.phase === "MONTAGEM" && linkInfo.numped) {
+    if (classification === "POSITIVA" && linkInfo.phase === "MONTAGEM" && montOrder) {
       try {
-        const order = await queryOne<{ id: string }>(
-          "SELECT ID FROM MONT_ORDERS WHERE NUMPED = :numped",
-          { numped: linkInfo.numped },
+        await execDml(
+          `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', UPDATED_AT = SYSTIMESTAMP
+           WHERE ASSEMBLY_JOB_ID IN (
+             SELECT ID FROM MONT_ASSEMBLY_JOBS WHERE ORDER_ID = :orderId
+           ) AND STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE'`,
+          { orderId: montOrder.id },
         );
-        if (order) {
-          await execDml(
-            `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', UPDATED_AT = SYSTIMESTAMP
-             WHERE ASSEMBLY_JOB_ID IN (
-               SELECT ID FROM MONT_ASSEMBLY_JOBS WHERE ORDER_ID = :orderId
-             ) AND STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE'`,
-            { orderId: order.id },
-          );
-          paymentImpact = "LIBERADO";
-          await execDml(
-            "UPDATE MONT_EVAL_RESPONSES SET PAYMENT_IMPACT = 'LIBERADO' WHERE ID = :id",
-            { id: responseId },
-          );
-        }
+        paymentImpact = "LIBERADO";
+        await execDml(
+          "UPDATE MONT_EVAL_RESPONSES SET PAYMENT_IMPACT = 'LIBERADO' WHERE ID = :id",
+          { id: responseId },
+        );
       } catch {
         // payment update failure doesn't block evaluation
       }
