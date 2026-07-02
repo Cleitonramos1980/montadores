@@ -29,7 +29,7 @@ if (!adminExists) {
   if (gestorRole) {
     await execDml("INSERT INTO MONT_USER_ROLES (USER_ID, ROLE_ID) VALUES (:u, :r)", { u: id, r: gestorRole.id });
   }
-  console.log(`[seed] Admin criado: ${adminEmail}`);
+  console.log(`[seed] Admin criado: ${adminEmail} / ${adminPassword}`);
 }
 
 // ── Demo provider ────────────────────────────────────────────────────────────
@@ -838,32 +838,14 @@ for (const t of templates) {
 }
 console.log(`[seed] Templates: ${inserted} inseridos, ${updated} atualizados.`);
 
-// ── Template: Entrega Confirmada — Agendar Montagem ──────────────────────────
-await upsertTemplate({
-  eventType:      "ENTREGA_CONFIRMADA_AGENDAR_MONTAGEM",
-  recipient:      "CLIENTE",
-  subject:        "Agende sua montagem",
-  body:
-    "Olá, {nome_cliente}! Seu pedido nº {numero_pedido} já foi entregue. 🏠\n\n" +
-    "Agora você já pode agendar a montagem dos seus produto(s).\n\n" +
-    "Escolha o melhor dia e horário pelo link oficial:\n{link_agendamento}\n\n" +
-    "Atenção: a {nome_empresa} não solicita senha, código de segurança ou dados de cartão por WhatsApp. " +
-    "Use apenas nossos canais oficiais: {dominio_oficial}",
-  ctaLabel:       "Agendar Montagem",
-  ctaUrlVar:      "link_agendamento",
-  antifraudeType: "PADRAO",
-});
-console.log("[seed] Template inserido: ENTREGA_CONFIRMADA_AGENDAR_MONTAGEM → CLIENTE");
-
 // ── Fluxo WinThor event config ───────────────────────────────────────────────
 const FLUXO_EVENTS = [
-  { key: "AGUARDANDO_MAPA_ESTOQUE",               label: "1 - Aguardando Mapa/Estoque",             ativoDash: 1, ativoMsg: 0 },
-  { key: "MAPA_EMITIDO_AGUARDANDO_SEPARACAO",     label: "2 - Mapa Emitido / Aguardando Separação", ativoDash: 1, ativoMsg: 1 },
-  { key: "EM_SEPARACAO_CONFERENCIA",              label: "3 - Em Separação / Conferência",           ativoDash: 1, ativoMsg: 1 },
-  { key: "CONFERIDO_AGUARDANDO_FATURAMENTO",      label: "4 - Conferido / Aguardando Faturamento",  ativoDash: 1, ativoMsg: 1 },
-  { key: "FATURADO_AGUARDANDO_SAIDA",             label: "5 - Faturado / Aguardando Saída",         ativoDash: 1, ativoMsg: 1 },
-  { key: "FINALIZADO",                            label: "6 - Finalizado no Fluxo Operacional",     ativoDash: 1, ativoMsg: 1 },
-  { key: "ENTREGA_CONFIRMADA_AGENDAR_MONTAGEM",   label: "Entrega Confirmada — Agendar Montagem",   ativoDash: 1, ativoMsg: 0 },
+  { key: "AGUARDANDO_MAPA_ESTOQUE",            label: "1 - Aguardando Mapa/Estoque",             ativoDash: 1, ativoMsg: 0 },
+  { key: "MAPA_EMITIDO_AGUARDANDO_SEPARACAO",  label: "2 - Mapa Emitido / Aguardando Separação", ativoDash: 1, ativoMsg: 1 },
+  { key: "EM_SEPARACAO_CONFERENCIA",           label: "3 - Em Separação / Conferência",           ativoDash: 1, ativoMsg: 1 },
+  { key: "CONFERIDO_AGUARDANDO_FATURAMENTO",   label: "4 - Conferido / Aguardando Faturamento",  ativoDash: 1, ativoMsg: 1 },
+  { key: "FATURADO_AGUARDANDO_SAIDA",          label: "5 - Faturado / Aguardando Saída",         ativoDash: 1, ativoMsg: 1 },
+  { key: "FINALIZADO",                         label: "6 - Finalizado no Fluxo Operacional",     ativoDash: 1, ativoMsg: 1 },
 ] as const;
 
 for (const ev of FLUXO_EVENTS) {

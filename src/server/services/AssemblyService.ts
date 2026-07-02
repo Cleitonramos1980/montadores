@@ -1,11 +1,14 @@
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne } from "../db/db";
+import { AppError, ForbiddenError } from "../errors";
 import { EventService } from "./EventService";
 
 export class AssemblyService {
   constructor(private readonly events = new EventService()) {}
 
-  async start(jobId: string) {
+  // requestingProviderId: pass the caller's provider ID when user is MONTADOR.
+  // Pass null to skip ownership check (ADMIN / GESTOR callers).
+  async start(jobId: string, requestingProviderId: string | null = null) {
     const job = await queryOne<{ id: string; order_id: string; numped: string; codcli: string; provider_id: string }>(
       `SELECT a.ID, a.ORDER_ID, a.PROVIDER_ID, o.NUMPED, o.CODCLI
        FROM MONT_ASSEMBLY_JOBS a
@@ -13,7 +16,10 @@ export class AssemblyService {
        WHERE a.ID = :jobId`,
       { jobId },
     );
-    if (!job) throw new Error("Montagem não encontrada.");
+    if (!job) throw new AppError("Montagem não encontrada.", 404, "NOT_FOUND");
+    if (requestingProviderId !== null && job.provider_id !== requestingProviderId) {
+      throw new ForbiddenError("Você não tem permissão para operar esta montagem.");
+    }
 
     await execDml(
       "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'EM_EXECUCAO', STARTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
@@ -40,13 +46,7 @@ export class AssemblyService {
     return { jobId, status: "EM_EXECUCAO" };
   }
 
-  async addPhoto(jobId: string, fileUrl: string, photoType = "EVIDENCIA") {
-    const photoId = uuid();
-    await execDml(
-      "INSERT INTO MONT_ASSEMBLY_PHOTOS (ID, ASSEMBLY_JOB_ID, FILE_URL, PHOTO_TYPE) VALUES (:id, :jobId, :fileUrl, :photoType)",
-      { id: photoId, jobId, fileUrl, photoType },
-    );
-
+  async addPhoto(jobId: string, fileUrl: string, photoType = "EVIDENCIA", requestingProviderId: string | null = null) {
     const job = await queryOne<{ order_id: string; numped: string; codcli: string; provider_id: string }>(
       `SELECT a.ORDER_ID, a.PROVIDER_ID, o.NUMPED, o.CODCLI
        FROM MONT_ASSEMBLY_JOBS a
@@ -54,31 +54,33 @@ export class AssemblyService {
        WHERE a.ID = :jobId`,
       { jobId },
     );
-
-    if (job) {
-      await this.events.emit({
-        type: "FOTOS_MONTAGEM_ANEXADAS",
-        orderId: job.order_id,
-        numped: job.numped,
-        codcli: job.codcli,
-        assemblyId: jobId,
-        providerId: job.provider_id,
-        origin: "MONTADOR",
-        metadata: { description: "Foto obrigatória anexada.", fileUrl },
-        idempotencyKey: `foto:${jobId}:${fileUrl}`,
-      });
+    if (!job) throw new AppError("Montagem não encontrada.", 404, "NOT_FOUND");
+    if (requestingProviderId !== null && job.provider_id !== requestingProviderId) {
+      throw new ForbiddenError("Você não tem permissão para operar esta montagem.");
     }
+
+    const photoId = uuid();
+    await execDml(
+      "INSERT INTO MONT_ASSEMBLY_PHOTOS (ID, ASSEMBLY_JOB_ID, FILE_URL, PHOTO_TYPE) VALUES (:id, :jobId, :fileUrl, :photoType)",
+      { id: photoId, jobId, fileUrl, photoType },
+    );
+
+    await this.events.emit({
+      type: "FOTOS_MONTAGEM_ANEXADAS",
+      orderId: job.order_id,
+      numped: job.numped,
+      codcli: job.codcli,
+      assemblyId: jobId,
+      providerId: job.provider_id,
+      origin: "MONTADOR",
+      metadata: { description: "Foto obrigatória anexada.", fileUrl },
+      idempotencyKey: `foto:${jobId}:${fileUrl}`,
+    });
 
     return { photoId };
   }
 
-  async finish(jobId: string) {
-    const photos = await queryOne<{ value: number }>(
-      "SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_PHOTOS WHERE ASSEMBLY_JOB_ID = :jobId",
-      { jobId },
-    );
-    if (Number(photos?.value ?? 0) < 2) throw new Error("Adicione ao menos 2 fotos de evidência antes de finalizar.");
-
+  async finish(jobId: string, requestingProviderId: string | null = null) {
     const job = await queryOne<{ id: string; order_id: string; numped: string; codcli: string; provider_id: string }>(
       `SELECT a.ID, a.ORDER_ID, a.PROVIDER_ID, o.NUMPED, o.CODCLI
        FROM MONT_ASSEMBLY_JOBS a
@@ -86,7 +88,16 @@ export class AssemblyService {
        WHERE a.ID = :jobId`,
       { jobId },
     );
-    if (!job) throw new Error("Montagem não encontrada.");
+    if (!job) throw new AppError("Montagem não encontrada.", 404, "NOT_FOUND");
+    if (requestingProviderId !== null && job.provider_id !== requestingProviderId) {
+      throw new ForbiddenError("Você não tem permissão para operar esta montagem.");
+    }
+
+    const photos = await queryOne<{ value: number }>(
+      "SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_PHOTOS WHERE ASSEMBLY_JOB_ID = :jobId",
+      { jobId },
+    );
+    if (Number(photos?.value ?? 0) < 1) throw new Error("Montagem não pode ser finalizada sem fotos obrigatórias.");
 
     await execDml(
       "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'FINALIZADA', FINISHED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
@@ -100,20 +111,6 @@ export class AssemblyService {
       "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_FINALIZADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
       { id: job.order_id },
     );
-
-    // Auto-recalculate commission based on PCPEDI items
-    const paymentRow = await queryOne<{ id: string }>(
-      "SELECT ID FROM MONT_PROVIDER_PAYMENTS WHERE ASSEMBLY_JOB_ID = :jobId",
-      { jobId },
-    );
-    if (paymentRow) {
-      try {
-        const { CommissionCalculationService } = await import("./CommissionCalculationService");
-        await new CommissionCalculationService().calculateForPayment(paymentRow.id);
-      } catch (err) {
-        console.warn(`[AssemblyService] Comissão não calculada: ${(err as Error).message}`);
-      }
-    }
 
     await this.events.emit({
       type: "MONTAGEM_FINALIZADA",

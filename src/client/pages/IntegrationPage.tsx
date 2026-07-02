@@ -2,45 +2,6 @@ import { useEffect, useState } from "react";
 import { ActionButton, LoadingState, Page, StatusBadge, useToast } from "../components/Ui";
 import { api } from "../lib/api";
 
-function FailureRow({ failure, onResolved }: { failure: any; onResolved: () => void }) {
-  const [retrying, setRetrying] = useState(false);
-  const toast = useToast();
-
-  const fmtDate = (v: string) => { try { return new Date(v).toLocaleString("pt-BR"); } catch { return v; } };
-
-  async function retry() {
-    setRetrying(true);
-    try {
-      await api(`/integration/failures/${failure.id}/retry`, { method: "POST", body: "{}" });
-      toast(`Falha marcada como resolvida (tentativa ${(failure.retry_count ?? 0) + 1}).`);
-      onResolved();
-    } catch (err) {
-      toast((err as Error).message, "error");
-    } finally {
-      setRetrying(false);
-    }
-  }
-
-  return (
-    <tr>
-      <td><code style={{ fontSize: 12 }}>{failure.operation}</code></td>
-      <td>{failure.reference ?? "—"}</td>
-      <td style={{ color: "var(--danger)", fontSize: 13, maxWidth: 260, wordBreak: "break-word" }}>{failure.error_message}</td>
-      <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{fmtDate(failure.created_at)}</td>
-      <td>
-        <ActionButton
-          className="ghostButton"
-          onClick={retry}
-          loadingLabel="..."
-          disabled={retrying}
-        >
-          ↻ Resolver
-        </ActionButton>
-      </td>
-    </tr>
-  );
-}
-
 export function IntegrationPage() {
   const [data, setData] = useState<{ failures: any[]; logs: any[] }>({ failures: [], logs: [] });
   const [numped, setNumped] = useState("");
@@ -108,11 +69,16 @@ export function IntegrationPage() {
             ) : (
               <table>
                 <thead>
-                  <tr><th>Operação</th><th>Referência</th><th>Erro</th><th>Data</th><th>Ações</th></tr>
+                  <tr><th>Operação</th><th>Referência</th><th>Erro</th><th>Data</th></tr>
                 </thead>
                 <tbody>
                   {data.failures.map((f: any) => (
-                    <FailureRow key={f.id} failure={f} onResolved={load} />
+                    <tr key={f.id}>
+                      <td><code style={{ fontSize: 12 }}>{f.operation}</code></td>
+                      <td>{f.reference}</td>
+                      <td style={{ color: "var(--danger)", fontSize: 13, maxWidth: 280, wordBreak: "break-word" }}>{f.error_message}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{fmtDate(f.created_at)}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>

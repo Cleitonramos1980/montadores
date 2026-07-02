@@ -5,7 +5,7 @@ import { OrderSnapshotService } from "./OrderSnapshotService";
 import { MessageLogService } from "./MessageLogService";
 import { MessageTriggerService } from "./MessageTriggerService";
 
-export type SyncMode = "DRY_RUN" | "PRODUCAO";
+export type SyncMode = "DRY_RUN" | "HOMOLOGACAO" | "PRODUCAO";
 
 export type SyncParams = {
   modo: SyncMode;
@@ -101,7 +101,7 @@ export class PedidoFluxoSyncService {
     for (const row of rows) {
       try {
         const numped = String(row.numped);
-        const { isNew, previousKey, changed } = await this.snapshots.upsert(row);
+        const { isNew, previousKey, changed, billingJustHappened } = await this.snapshots.upsert(row);
 
         if (!changed) continue;
 
@@ -150,6 +150,54 @@ export class PedidoFluxoSyncService {
           case "SIMULADO_DRY_RUN": msgsSimuladas++; break;
           case "ENVIADO":          msgsEnviadas++;   break;
           default:                 msgsIgnoradas++;  break;
+        }
+
+        // Billing milestone — the FATURADO_AGUARDANDO_SAIDA phase is transient (DTFAT set,
+        // DTSAIDA null). When polling catches an order that already advanced past it
+        // (e.g. straight to FINALIZADO), the linear phase event above skips billing entirely.
+        // Emit the billing event explicitly on the DTFAT transition so the notification fires.
+        // The trigger's idempotency key (fluxo:numped:FATURADO_AGUARDANDO_SAIDA) prevents any
+        // duplicate send if the order also landed on the phase naturally in a prior cycle.
+        if (billingJustHappened && row.fluxo_event_key !== "FATURADO_AGUARDANDO_SAIDA") {
+          const billingEventId = uuid();
+          await execDml(
+            `INSERT INTO MONT_FLUXO_EVENTS
+             (ID, NUMPED, CODCLI, EVENT_KEY,
+              FLUXO_STATUS_ANTERIOR, FLUXO_STATUS_NOVO,
+              FLUXO_EVENT_KEY_ANTERIOR, FLUXO_EVENT_KEY_NOVO,
+              PAYLOAD_ORIGEM, ORIGEM, CRIADO_EM)
+             VALUES
+             (:id, :numped, :codcli, 'FATURADO_AGUARDANDO_SAIDA',
+              :statusAnterior, '5 - FATURADO/AGUARDANDO SAIDA',
+              :keyAnterior, 'FATURADO_AGUARDANDO_SAIDA',
+              :payload, 'SYNC_MILESTONE', SYSTIMESTAMP)`,
+            {
+              id:             billingEventId,
+              numped,
+              codcli:         row.codcli ?? null,
+              statusAnterior: previousKey,
+              keyAnterior:    previousKey,
+              payload:        JSON.stringify({ numped, numnota: row.numnota, motivo: "milestone_faturamento_fase_pulada", faseAtual: row.fluxo_event_key }),
+            },
+          );
+          eventosGerados++;
+
+          const billingResult = await this.trigger.process(
+            {
+              id:                billingEventId,
+              numped,
+              codcli:            row.codcli ?? "",
+              eventKey:          "FATURADO_AGUARDANDO_SAIDA",
+              fluxoEventKeyNovo: "FATURADO_AGUARDANDO_SAIDA",
+            },
+            snapshot,
+          );
+
+          switch (billingResult.status) {
+            case "SIMULADO_DRY_RUN": msgsSimuladas++; break;
+            case "ENVIADO":          msgsEnviadas++;   break;
+            default:                 msgsIgnoradas++;  break;
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

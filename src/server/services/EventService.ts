@@ -3,6 +3,7 @@ import type { EventType } from "../../shared/domain";
 import { execDml, queryOne } from "../db/db";
 import { json } from "../db/database";
 import { AuditService } from "./AuditService";
+import { AppEventMessageService } from "./AppEventMessageService";
 
 const timelineTitle: Partial<Record<EventType, string>> = {
   // Pedido
@@ -73,7 +74,10 @@ const timelineTitle: Partial<Record<EventType, string>> = {
 };
 
 export class EventService {
-  constructor(private readonly audit = new AuditService()) {}
+  constructor(
+    private readonly audit = new AuditService(),
+    private readonly appMessages = new AppEventMessageService(),
+  ) {}
 
   async emit(input: {
     type: EventType;
@@ -85,7 +89,7 @@ export class EventService {
     paymentId?: string;
     previousStatus?: string;
     newStatus?: string;
-    origin: "WINTHOR" | "SISTEMA" | "CLIENTE" | "OPERACAO" | "MONTADOR" | "SAC" | "FINANCEIRO" | "ADMIN" | "JOB";
+    origin: "WINTHOR" | "SISTEMA" | "CLIENTE" | "MONTADOR" | "SAC" | "FINANCEIRO" | "ADMIN" | "JOB";
     metadata?: Record<string, unknown>;
     userId?: string;
     idempotencyKey: string;
@@ -150,6 +154,22 @@ export class EventService {
         ip: input.ip,
         userAgent: input.userAgent,
       });
+    }
+
+    // Ponto único de despacho de mensagens: todo evento de domínio passa pelo
+    // MessageTriggerService (via AppEventMessageService), que aplica modo global,
+    // config do evento, idempotência, opt-out e janela de horário. Eventos cujas
+    // mensagens já são tratadas por outro caminho estão na SKIP list da ponte.
+    // Falha no gatilho de mensagem nunca derruba a emissão do evento.
+    try {
+      await this.appMessages.handleDomainEvent({
+        type:    input.type,
+        eventId: id,
+        numped:  input.numped,
+        codcli:  input.codcli ?? "",
+      });
+    } catch (err) {
+      console.error(`[EventService] Gatilho de mensagem falhou para ${input.type}/${input.numped}:`, (err as Error).message);
     }
 
     return id;

@@ -17,60 +17,7 @@ const customerFacing = new Set([
   "PAGAMENTO_LIBERADO",
 ]);
 
-const CUSTOMER_FACING_STEPS = [
-  "PEDIDO_CRIADO",
-  "SEPARACAO_INICIADA",
-  "CONFERENCIA_FINALIZADA",
-  "FATURADO",
-  "SAIU_PARA_ENTREGA",
-  "ENTREGA_REALIZADA",
-  "MONTAGEM_NECESSARIA",
-  "MONTAGEM_AGENDADA",
-  "MONTAGEM_INICIADA",
-  "MONTAGEM_FINALIZADA",
-  "AVALIACAO_CLIENTE_RECEBIDA",
-  "SAC_CASO_ABERTO",
-  "PAGAMENTO_LIBERADO",
-] as const;
-
 export class FlowService {
-  async rulerStats(): Promise<{ eventType: string; count: number }[]> {
-    // Early-pipeline steps sourced directly from WinThor tables for accurate counts.
-    // Montagem steps come from MONT_ORDER_EVENTS (app-managed).
-    const [winthorRows, eventRows] = await Promise.all([
-      queryRows<{ step_type: string; cnt: number }>(
-        `SELECT 'PEDIDO_CRIADO' AS STEP_TYPE, COUNT(*) AS CNT FROM PCPEDC
-         UNION ALL
-         SELECT 'SEPARACAO_INICIADA', COUNT(*) FROM PCPEDC WHERE TRIM(POSICAO) IN ('E','Q','F')
-         UNION ALL
-         SELECT 'CONFERENCIA_FINALIZADA', COUNT(*) FROM PCPEDC WHERE TRIM(POSICAO) IN ('Q','F')
-         UNION ALL
-         SELECT 'FATURADO', COUNT(*) FROM PCPEDC WHERE TRIM(POSICAO) = 'F'
-         UNION ALL
-         SELECT 'SAIU_PARA_ENTREGA', COUNT(DISTINCT p.NUMPED)
-           FROM PCPEDC p JOIN PCCARREG c ON c.NUMCAR = p.NUMCAR
-           WHERE c.DTSAIDA IS NOT NULL AND p.NUMCAR IS NOT NULL
-         UNION ALL
-         SELECT 'ENTREGA_REALIZADA', COUNT(DISTINCT n.NUMPED)
-           FROM PCNFSAID n WHERE n.DTCANHOTO IS NOT NULL`,
-      ),
-      queryRows<{ type: string; cnt: number }>(
-        `SELECT e.TYPE, COUNT(DISTINCT e.NUMPED) AS CNT
-         FROM MONT_ORDER_EVENTS e
-         WHERE e.TYPE IN ('MONTAGEM_NECESSARIA','MONTAGEM_AGENDADA','MONTAGEM_INICIADA',
-                          'MONTAGEM_FINALIZADA','AVALIACAO_CLIENTE_RECEBIDA',
-                          'SAC_CASO_ABERTO','PAGAMENTO_LIBERADO')
-         GROUP BY e.TYPE`,
-      ),
-    ]);
-
-    const countMap = new Map<string, number>();
-    for (const r of winthorRows) countMap.set(r.step_type, Number(r.cnt));
-    for (const r of eventRows) countMap.set(r.type, Number(r.cnt));
-
-    return CUSTOMER_FACING_STEPS.map((et) => ({ eventType: et, count: countMap.get(et) ?? 0 }));
-  }
-
   async ruler() {
     const orders = await queryRows<{
       id: string;
@@ -118,5 +65,18 @@ export class FlowService {
         };
       }),
     );
+  }
+
+  async rulerStats() {
+    const rows = await queryRows<{ current_status: string; cnt: number }>(
+      `SELECT CURRENT_STATUS, COUNT(*) AS CNT
+       FROM MONT_ORDERS
+       GROUP BY CURRENT_STATUS
+       ORDER BY CNT DESC`,
+    );
+    return {
+      byStatus: Object.fromEntries(rows.map((r) => [r.current_status, Number(r.cnt)])),
+      total:    rows.reduce((acc, r) => acc + Number(r.cnt), 0),
+    };
   }
 }

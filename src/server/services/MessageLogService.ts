@@ -8,12 +8,13 @@ export type MessageLogStatus =
   | "IGNORADO_DUPLICIDADE"
   | "IGNORADO_EVENTO_INATIVO"
   | "IGNORADO_SEM_TELEFONE"
+  | "IGNORADO_SEM_PILOTO"
+  | "IGNORADO_OPT_OUT"
   | "IGNORADO_FORA_DO_MODELO"
+  | "IGNORADO_FORA_HORARIO"
   | "IGNORADO_TEMPLATE_INATIVO"
   | "IGNORADO_REGRA_NAO_VALIDADA"
-  | "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM"
-  | "IGNORADO_MONTADOR_INATIVO"
-  | "IGNORADO_MONTADOR_NAO_APROVADO";
+  | "HOMOLOGACAO_ENVIADO_DESTINO_FORCADO";
 
 export type MessageLogEntry = {
   numped: string;
@@ -76,13 +77,27 @@ export class MessageLogService {
     }
   }
 
-  async checkIdempotency(idempotencyKey: string): Promise<boolean> {
+  async checkIdempotency(idempotencyKey: string, mode?: string): Promise<boolean> {
+    const checkStatus = mode === "DRY_RUN" ? "SIMULADO_DRY_RUN" : "ENVIADO";
     const row = await queryOne<{ cnt: number }>(
       `SELECT COUNT(*) AS CNT FROM MONT_MESSAGE_LOGS
-       WHERE IDEMPOTENCY_KEY = :key AND STATUS = 'ENVIADO'`,
-      { key: idempotencyKey },
+       WHERE IDEMPOTENCY_KEY = :key AND STATUS = :status`,
+      { key: idempotencyKey, status: checkStatus },
     );
     return Number(row?.cnt ?? 0) > 0;
+  }
+
+  async getSendHistory(baseKey: string): Promise<{ resendCount: number; lastSentAt: Date | null }> {
+    const row = await queryOne<{ cnt: number; last_sent: Date | null }>(
+      `SELECT COUNT(*) AS CNT, MAX(ENVIADO_EM) AS LAST_SENT
+       FROM MONT_MESSAGE_LOGS
+       WHERE IDEMPOTENCY_KEY LIKE :keyPattern AND STATUS = 'ENVIADO'`,
+      { keyPattern: `${baseKey}%` },
+    );
+    return {
+      resendCount: Number(row?.cnt ?? 0),
+      lastSentAt:  row?.last_sent ?? null,
+    };
   }
 
   async list(filters: MessageLogFilters = {}): Promise<{ rows: unknown[]; total: number }> {

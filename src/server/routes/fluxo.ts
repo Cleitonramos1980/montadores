@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { Router } from "express";
 import { z } from "zod";
-import { authMiddleware, requireRole } from "../middleware/auth";
+import { authMiddleware } from "../middleware/auth";
 import { PedidoFluxoSyncService } from "../services/PedidoFluxoSyncService";
 import { DashboardPedidoFluxoService } from "../services/DashboardPedidoFluxoService";
 import { MessageLogService } from "../services/MessageLogService";
@@ -26,7 +26,7 @@ fluxo.get("/fluxo/sync/config", asyncRoute(async (_req, res) => {
   res.json(await sync.getConfig());
 }));
 
-fluxo.put("/fluxo/sync/config", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
+fluxo.put("/fluxo/sync/config", asyncRoute(async (req, res) => {
   const body = z.object({
     key:   z.string().min(1).max(100),
     value: z.string().max(500),
@@ -38,7 +38,7 @@ fluxo.put("/fluxo/sync/config", requireRole("ADMIN", "GESTOR"), asyncRoute(async
 // ── Sync run ──────────────────────────────────────────────────────────────────
 
 const syncRunSchema = z.object({
-  modo:            z.enum(["DRY_RUN", "PRODUCAO"]).default("DRY_RUN"),
+  modo:            z.enum(["DRY_RUN", "HOMOLOGACAO", "PRODUCAO"]).default("DRY_RUN"),
   condvenda:       z.coerce.number().int().optional(),
   dataInicioPedido: z.string().optional(),
   dataFimPedido:   z.string().optional(),
@@ -46,7 +46,7 @@ const syncRunSchema = z.object({
   codfilial:       z.string().optional(),
 });
 
-fluxo.post("/fluxo/sync/run", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
+fluxo.post("/fluxo/sync/run", asyncRoute(async (req, res) => {
   const body = syncRunSchema.parse(req.body);
   const result = await sync.run({
     modo:            body.modo,
@@ -116,7 +116,7 @@ fluxo.get("/fluxo/events", asyncRoute(async (_req, res) => {
   res.json(await dash.getEventConfigs());
 }));
 
-fluxo.put("/fluxo/events/:key/config", requireRole("ADMIN", "GESTOR"), asyncRoute(async (req, res) => {
+fluxo.put("/fluxo/events/:key/config", asyncRoute(async (req, res) => {
   const { key } = req.params;
   const body = z.object({
     ativo_dashboard: z.number().int().min(0).max(1).optional(),

@@ -201,11 +201,6 @@ function SyncControls({ config, onRan }: { config: SyncConfig; onRan: () => void
       {diag && (
         <div style={{ marginTop: 12, fontSize: 12, background: "#f8f9ff", border: "1px solid #cdd", borderRadius: 8, padding: "12px 14px" }}>
           <strong style={{ fontSize: 13 }}>Diagnóstico WinThor</strong>
-          {diag.condvendas_erro && (
-            <div style={{ marginTop: 6, padding: "6px 10px", background: "#fff3f3", border: "1px solid #ffcdd2", borderRadius: 6, color: "var(--danger)" }}>
-              ⚠ Oracle indisponível: {diag.condvendas_erro}
-            </div>
-          )}
           <div style={{ marginTop: 8 }}>
             <strong>Colunas PCPEDC:</strong>{" "}
             {Object.entries(diag.colunas_pcpedc ?? {}).map(([col, ok]) => (

@@ -49,7 +49,6 @@ type FormState = {
   email: string;
   city: string;
   uf: string;
-  cep: string;
   regions: string;
   serviceTypes: string[];
   productTypes: string[];
@@ -68,7 +67,6 @@ const EMPTY: FormState = {
   email: "",
   city: "",
   uf: "",
-  cep: "",
   regions: "",
   serviceTypes: ["MONTAGEM"],
   productTypes: ["MOVEIS"],
@@ -86,7 +84,6 @@ export function ProviderNewPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
-  const [cepLoading, setCepLoading] = useState(false);
   const toast = useToast();
 
   async function doSearch() {
@@ -115,7 +112,6 @@ export function ProviderNewPage() {
       email: s.email?.trim() || prev.email,
       city: s.cidade?.trim() || prev.city,
       uf: s.estado?.trim().toUpperCase().slice(0, 2) || prev.uf,
-      cep: s.cep?.replace(/\D/g, "") || prev.cep,
       phone: s.telrep?.replace(/\D/g, "") || prev.phone,
     }));
   }
@@ -129,26 +125,6 @@ export function ProviderNewPage() {
 
   function set(field: keyof FormState, value: string | number) {
     setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  async function fetchCep(rawCep: string) {
-    const digits = rawCep.replace(/\D/g, "");
-    if (digits.length !== 8) return;
-    setCepLoading(true);
-    try {
-      const r = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
-      const data = await r.json();
-      if (data.erro) { toast("CEP não encontrado.", "error" as any); return; }
-      setForm((prev) => ({
-        ...prev,
-        city: data.localidade ?? prev.city,
-        uf:   data.uf?.toUpperCase() ?? prev.uf,
-      }));
-    } catch {
-      // ViaCEP unavailable — ignore silently
-    } finally {
-      setCepLoading(false);
-    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -171,7 +147,6 @@ export function ProviderNewPage() {
           email: form.email.trim() || undefined,
           city: form.city.trim() || undefined,
           uf: form.uf.trim().toUpperCase() || undefined,
-          cep: form.cep.replace(/\D/g, "") || undefined,
           regions: form.regions.split(",").map((v) => v.trim()).filter(Boolean),
           serviceTypes: form.serviceTypes,
           productTypes: form.productTypes,
@@ -364,20 +339,7 @@ export function ProviderNewPage() {
         {/* Localização */}
         <div className="panel" style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 16px", fontSize: 15 }}>Localização</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 14 }}>
-            <label style={{ gridColumn: "1/-1" }}>
-              <span className="fieldLabel">CEP {cepLoading && <span style={{ color: "var(--text-muted)", fontSize: 12 }}>(buscando...)</span>}</span>
-              <input
-                value={form.cep}
-                onChange={(e) => set("cep", e.target.value)}
-                onBlur={(e) => fetchCep(e.target.value)}
-                placeholder="00000-000"
-                maxLength={9}
-              />
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, display: "block" }}>
-                Preenchimento automático de cidade e UF ao sair do campo.
-              </span>
-            </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 14 }}>
             <label>
               <span className="fieldLabel">Cidade</span>
               <input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="São Paulo" />

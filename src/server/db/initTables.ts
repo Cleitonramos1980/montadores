@@ -227,21 +227,6 @@ const TABLES: Array<{ name: string; ddl: string }> = [
     )`,
   },
   {
-    name: "MONT_ASSEMBLY_JOB_ITEMS",
-    ddl: `CREATE TABLE MONT_ASSEMBLY_JOB_ITEMS (
-      ID VARCHAR2(36) PRIMARY KEY,
-      ASSEMBLY_JOB_ID VARCHAR2(36) NOT NULL,
-      CODPROD NUMBER NOT NULL,
-      DESCRICAO VARCHAR2(500),
-      QUANTITY NUMBER(14,4) NOT NULL,
-      RULE_SOURCE VARCHAR2(20) NOT NULL,
-      COMMISSION_PERCENT NUMBER(8,4),
-      FIXED_AMOUNT NUMBER(14,4),
-      CALCULATED_AMOUNT NUMBER(14,4),
-      CREATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  {
     name: "MONT_ASSEMBLY_PHOTOS",
     ddl: `CREATE TABLE MONT_ASSEMBLY_PHOTOS (
       ID VARCHAR2(36) PRIMARY KEY,
@@ -393,24 +378,6 @@ const TABLES: Array<{ name: string; ddl: string }> = [
     )`,
   },
   {
-    name: "MONT_DEPT_COMMISSIONS",
-    ddl: `CREATE TABLE MONT_DEPT_COMMISSIONS (
-      ID VARCHAR2(36) PRIMARY KEY,
-      CODEPTO VARCHAR2(20) NOT NULL,
-      DESCRIPTION VARCHAR2(500) NOT NULL,
-      CALCULATION_TYPE VARCHAR2(20) DEFAULT 'PERCENTAGE' NOT NULL,
-      COMMISSION_PERCENT NUMBER(6,2) DEFAULT 0 NOT NULL,
-      FIXED_AMOUNT NUMBER(14,4),
-      ACTIVE NUMBER(1) DEFAULT 1 NOT NULL,
-      NOTES VARCHAR2(1000),
-      CREATED_BY VARCHAR2(36),
-      UPDATED_BY VARCHAR2(36),
-      CREATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT UQ_MONT_DEPT_COMM UNIQUE (CODEPTO)
-    )`,
-  },
-  {
     name: "MONT_AUDIT_LOGS",
     ddl: `CREATE TABLE MONT_AUDIT_LOGS (
       ID VARCHAR2(36) PRIMARY KEY,
@@ -530,237 +497,50 @@ const TABLES: Array<{ name: string; ddl: string }> = [
       ATUALIZADO_EM TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
     )`,
   },
-  {
-    name: "MONT_COMMISSION_CALC_ITEMS",
-    ddl: `CREATE TABLE MONT_COMMISSION_CALC_ITEMS (
-      ID VARCHAR2(36) PRIMARY KEY,
-      PAYMENT_ID VARCHAR2(36) NOT NULL,
-      NUMPED VARCHAR2(50) NOT NULL,
-      CODPROD VARCHAR2(100) NOT NULL,
-      DESCRICAO VARCHAR2(500),
-      UNIDADE VARCHAR2(20),
-      QT_VENDIDA NUMBER(12,4),
-      PVENDA NUMBER(14,4),
-      VALOR_BASE NUMBER(14,2),
-      CALCULATION_TYPE VARCHAR2(20),
-      FIXED_AMOUNT NUMBER(14,4),
-      PERCENTAGE_RATE NUMBER(6,4),
-      COMMISSION_AMOUNT NUMBER(14,2) DEFAULT 0 NOT NULL,
-      RULE_ID VARCHAR2(36),
-      NOTE VARCHAR2(500),
-      CREATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  {
-    name: "MONT_PASSWORD_RESET_TOKENS",
-    ddl: `CREATE TABLE MONT_PASSWORD_RESET_TOKENS (
-      ID VARCHAR2(36) PRIMARY KEY,
-      USER_ID VARCHAR2(36) NOT NULL,
-      TOKEN_HASH VARCHAR2(255) NOT NULL,
-      EXPIRES_AT TIMESTAMP NOT NULL,
-      USED_AT TIMESTAMP,
-      CREATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT UQ_MONT_PRT_TOKEN UNIQUE (TOKEN_HASH)
-    )`,
-  },
-  {
-    name: "MONT_AGENDA_CANDIDATOS",
-    ddl: `CREATE TABLE MONT_AGENDA_CANDIDATOS (
-      NUMPED                  VARCHAR2(50) PRIMARY KEY,
-      CODCLI                  VARCHAR2(50),
-      NOME_CLIENTE            VARCHAR2(255),
-      TELEFONE                VARCHAR2(50),
-      CODFILIAL               VARCHAR2(10),
-      NUMNOTA                 VARCHAR2(50),
-      NUMCAR                  VARCHAR2(50),
-      DATA_FATURAMENTO        TIMESTAMP,
-      DATA_SAIDA_NOTA         TIMESTAMP,
-      DATA_ENTREGA_CONFIRMADA TIMESTAMP,
-      ORIGEM_ENTREGA          VARCHAR2(50) DEFAULT 'PCCARREG_DTFECHA' NOT NULL,
-      STATUS_AGENDA           VARCHAR2(50) DEFAULT 'ENTREGUE_APTO_AGENDAMENTO' NOT NULL,
-      CONVITE_ENVIADO         NUMBER(1) DEFAULT 0 NOT NULL,
-      DATA_ENVIO_CONVITE      TIMESTAMP,
-      IDEMPOTENCY_KEY         VARCHAR2(200),
-      MONTAGEM_AGENDADA       NUMBER(1) DEFAULT 0 NOT NULL,
-      DATA_MONTAGEM_AGENDADA  TIMESTAMP,
-      CREATED_AT              TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT              TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  // ── Filiais por usuário ───────────────────────────────────────────────────────
-  {
-    name: "MONT_USER_FILIAIS",
-    ddl: `CREATE TABLE MONT_USER_FILIAIS (
-      USER_ID    VARCHAR2(36) NOT NULL,
-      CODFILIAL  VARCHAR2(20) NOT NULL,
-      CREATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT PK_MONT_USER_FILIAIS PRIMARY KEY (USER_ID, CODFILIAL)
-    )`,
-  },
-  // ── Novos recursos: disponibilidade, certificações, retrabalho ───────────────
-  {
-    name: "MONT_PROVIDER_UNAVAILABILITY",
-    ddl: `CREATE TABLE MONT_PROVIDER_UNAVAILABILITY (
-      ID           VARCHAR2(36) PRIMARY KEY,
-      PROVIDER_ID  VARCHAR2(36) NOT NULL,
-      UNAVAIL_DATE DATE NOT NULL,
-      REASON       VARCHAR2(200),
-      CREATED_BY   VARCHAR2(36),
-      CREATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  {
-    name: "MONT_PROVIDER_CERTIFICATIONS",
-    ddl: `CREATE TABLE MONT_PROVIDER_CERTIFICATIONS (
-      ID           VARCHAR2(36) PRIMARY KEY,
-      PROVIDER_ID  VARCHAR2(36) NOT NULL,
-      CERT_TYPE    VARCHAR2(80) NOT NULL,
-      FILE_URL     VARCHAR2(2000),
-      ISSUED_AT    DATE,
-      VALID_UNTIL  DATE,
-      STATUS       VARCHAR2(20) DEFAULT 'PENDENTE' NOT NULL,
-      NOTES        VARCHAR2(500),
-      CREATED_BY   VARCHAR2(36),
-      CREATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  {
-    name: "MONT_ASSEMBLY_REWORKS",
-    ddl: `CREATE TABLE MONT_ASSEMBLY_REWORKS (
-      ID              VARCHAR2(36) PRIMARY KEY,
-      ASSEMBLY_JOB_ID VARCHAR2(36) NOT NULL,
-      PROVIDER_ID     VARCHAR2(36) NOT NULL,
-      SAC_ID          VARCHAR2(36),
-      REASON          VARCHAR2(200) NOT NULL,
-      DESCRIPTION     VARCHAR2(4000),
-      STATUS          VARCHAR2(20) DEFAULT 'PENDENTE' NOT NULL,
-      RESOLVED_AT     TIMESTAMP,
-      RESOLVED_BY     VARCHAR2(36),
-      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  // ── PIX — Contas de pagamento do montador ────────────────────────────────────
-  {
-    name: "MONT_PROVIDER_PAYMENT_ACCOUNTS",
-    ddl: `CREATE TABLE MONT_PROVIDER_PAYMENT_ACCOUNTS (
-      ID              VARCHAR2(36) PRIMARY KEY,
-      PROVIDER_ID     VARCHAR2(36) NOT NULL,
-      PIX_KEY_TYPE    VARCHAR2(40)  NOT NULL,
-      PIX_KEY         VARCHAR2(255) NOT NULL,
-      HOLDER_NAME     VARCHAR2(255) NOT NULL,
-      HOLDER_DOCUMENT VARCHAR2(30),
-      STATUS          VARCHAR2(20) DEFAULT 'PENDENTE' NOT NULL,
-      VALIDATED_AT    TIMESTAMP,
-      VALIDATED_BY    VARCHAR2(36),
-      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT UQ_MONT_PPA_PROV UNIQUE (PROVIDER_ID)
-    )`,
-  },
-  // ── PIX — Solicitações de pagamento ──────────────────────────────────────────
-  {
-    name: "MONT_PIX_PAYMENT_REQUESTS",
-    ddl: `CREATE TABLE MONT_PIX_PAYMENT_REQUESTS (
-      ID                  VARCHAR2(36) PRIMARY KEY,
-      PROVIDER_PAYMENT_ID VARCHAR2(36) NOT NULL,
-      PROVIDER_ID         VARCHAR2(36) NOT NULL,
-      AMOUNT              NUMBER(14,2) NOT NULL,
-      PIX_KEY             VARCHAR2(255) NOT NULL,
-      PSP_PROVIDER        VARCHAR2(50)  DEFAULT 'DISABLED' NOT NULL,
-      STATUS              VARCHAR2(30)  DEFAULT 'PENDENTE' NOT NULL,
-      IDEMPOTENCY_KEY     VARCHAR2(100) NOT NULL,
-      EXTERNAL_PAYMENT_ID VARCHAR2(200),
-      END_TO_END_ID       VARCHAR2(200),
-      REQUEST_PAYLOAD     CLOB,
-      RESPONSE_PAYLOAD    CLOB,
-      ERROR_MESSAGE       VARCHAR2(2000),
-      REQUESTED_BY        VARCHAR2(36),
-      REQUESTED_AT        TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONFIRMED_AT        TIMESTAMP,
-      CREATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT UQ_MONT_PIX_IDEMPOTENCY UNIQUE (IDEMPOTENCY_KEY)
-    )`,
-  },
-  // ── PIX — Webhooks do PSP ──────────────────────────────────────────────────
-  {
-    name: "MONT_PIX_PAYMENT_WEBHOOKS",
-    ddl: `CREATE TABLE MONT_PIX_PAYMENT_WEBHOOKS (
-      ID                  VARCHAR2(36) PRIMARY KEY,
-      PSP_PROVIDER        VARCHAR2(50) NOT NULL,
-      EXTERNAL_PAYMENT_ID VARCHAR2(200),
-      EVENT_TYPE          VARCHAR2(80) NOT NULL,
-      PAYLOAD             CLOB NOT NULL,
-      PROCESSED           NUMBER(1) DEFAULT 0 NOT NULL,
-      PROCESSED_AT        TIMESTAMP,
-      CREATED_AT          TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )`,
-  },
-  // ── Notificações do montador ──────────────────────────────────────────────
-  {
-    name: "MONT_PROVIDER_NOTIFICATIONS",
-    ddl: `CREATE TABLE MONT_PROVIDER_NOTIFICATIONS (
-      ID              VARCHAR2(36) PRIMARY KEY,
-      PROVIDER_ID     VARCHAR2(36) NOT NULL,
-      TYPE            VARCHAR2(80) NOT NULL,
-      TITLE           VARCHAR2(255) NOT NULL,
-      BODY            VARCHAR2(2000) NOT NULL,
-      ASSEMBLY_JOB_ID VARCHAR2(36),
-      NUMPED          VARCHAR2(50),
-      READ_AT         TIMESTAMP,
-      IDEMPOTENCY_KEY VARCHAR2(255),
-      DRY_RUN         NUMBER(1) DEFAULT 1 NOT NULL,
-      CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT UQ_MONT_PROVNOTIF_IDEMP UNIQUE (IDEMPOTENCY_KEY)
-    )`,
-  },
-  // ── Configuração de avaliações por fase ────────────────────────────────────
+  // ── Evaluation module ────────────────────────────────────────────────────────
   {
     name: "MONT_EVAL_CONFIGS",
     ddl: `CREATE TABLE MONT_EVAL_CONFIGS (
-      ID          VARCHAR2(36) PRIMARY KEY,
-      PHASE       VARCHAR2(40) NOT NULL,
-      TITLE       VARCHAR2(255) NOT NULL,
-      DESCRIPTION VARCHAR2(2000),
-      ACTIVE      NUMBER(1) DEFAULT 1 NOT NULL,
-      LINK_TTL_DAYS NUMBER(3) DEFAULT 7 NOT NULL,
-      CREATED_BY  VARCHAR2(36),
-      UPDATED_BY  VARCHAR2(36),
-      CREATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      UPDATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      ID           VARCHAR2(36) PRIMARY KEY,
+      PHASE        VARCHAR2(40)  NOT NULL,
+      TITLE        VARCHAR2(255) NOT NULL,
+      DESCRIPTION  CLOB,
+      ACTIVE       NUMBER(1)     DEFAULT 1 NOT NULL,
+      LINK_TTL_DAYS NUMBER(3)   DEFAULT 7  NOT NULL,
+      CREATED_BY   VARCHAR2(36),
+      UPDATED_BY   VARCHAR2(36),
+      CREATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      UPDATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
       CONSTRAINT UQ_MONT_EVAL_CONFIGS_PHASE UNIQUE (PHASE)
     )`,
   },
   {
     name: "MONT_EVAL_QUESTIONS",
     ddl: `CREATE TABLE MONT_EVAL_QUESTIONS (
-      ID          VARCHAR2(36) PRIMARY KEY,
-      CONFIG_ID   VARCHAR2(36) NOT NULL,
-      POSITION    NUMBER(3) DEFAULT 1 NOT NULL,
-      TYPE        VARCHAR2(40) DEFAULT 'SCALE' NOT NULL,
-      LABEL       VARCHAR2(500) NOT NULL,
-      REQUIRED    NUMBER(1) DEFAULT 1 NOT NULL,
-      MIN_LABEL   VARCHAR2(100),
-      MAX_LABEL   VARCHAR2(100),
+      ID           VARCHAR2(36) PRIMARY KEY,
+      CONFIG_ID    VARCHAR2(36) NOT NULL,
+      POSITION     NUMBER(4)    NOT NULL,
+      TYPE         VARCHAR2(40) DEFAULT 'SCALE' NOT NULL,
+      LABEL        VARCHAR2(500) NOT NULL,
+      REQUIRED     NUMBER(1)    DEFAULT 1 NOT NULL,
+      MIN_LABEL    VARCHAR2(100),
+      MAX_LABEL    VARCHAR2(100),
       OPTIONS_JSON CLOB,
-      ACTIVE      NUMBER(1) DEFAULT 1 NOT NULL,
-      CREATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+      ACTIVE       NUMBER(1)    DEFAULT 1 NOT NULL,
+      CREATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
     )`,
   },
-  // ── Links públicos de avaliação ────────────────────────────────────────────
   {
     name: "MONT_EVAL_LINKS",
     ddl: `CREATE TABLE MONT_EVAL_LINKS (
       ID              VARCHAR2(36) PRIMARY KEY,
-      TOKEN           VARCHAR2(255) NOT NULL,
-      CONFIG_ID       VARCHAR2(36) NOT NULL,
+      TOKEN           VARCHAR2(100) NOT NULL,
+      CONFIG_ID       VARCHAR2(36)  NOT NULL,
       ORDER_ID        VARCHAR2(36),
       ASSEMBLY_JOB_ID VARCHAR2(36),
-      NUMPED          VARCHAR2(50),
-      CODCLI          VARCHAR2(50),
-      PHASE           VARCHAR2(40) NOT NULL,
+      NUMPED          VARCHAR2(40),
+      CODCLI          VARCHAR2(20),
+      PHASE           VARCHAR2(40)  NOT NULL,
       EXPIRES_AT      TIMESTAMP NOT NULL,
       USED_AT         TIMESTAMP,
       CREATED_BY      VARCHAR2(36),
@@ -768,25 +548,23 @@ const TABLES: Array<{ name: string; ddl: string }> = [
       CONSTRAINT UQ_MONT_EVAL_LINKS_TOKEN UNIQUE (TOKEN)
     )`,
   },
-  // ── Respostas de avaliação ─────────────────────────────────────────────────
   {
     name: "MONT_EVAL_RESPONSES",
     ddl: `CREATE TABLE MONT_EVAL_RESPONSES (
       ID              VARCHAR2(36) PRIMARY KEY,
-      LINK_ID         VARCHAR2(36) NOT NULL,
-      CONFIG_ID       VARCHAR2(36) NOT NULL,
+      LINK_ID         VARCHAR2(36),
+      CONFIG_ID       VARCHAR2(36),
       ORDER_ID        VARCHAR2(36),
       ASSEMBLY_JOB_ID VARCHAR2(36),
-      NUMPED          VARCHAR2(50),
-      CODCLI          VARCHAR2(50),
+      NUMPED          VARCHAR2(40),
+      CODCLI          VARCHAR2(20),
       PHASE           VARCHAR2(40) NOT NULL,
-      SCORE           NUMBER(5,2),
-      CLASSIFICATION  VARCHAR2(40),
-      EVAL_COMMENT    VARCHAR2(4000),
-      SAC_TRIGGERED   NUMBER(1) DEFAULT 0 NOT NULL,
-      SAC_CASE_ID     VARCHAR2(36),
+      SCORE           NUMBER(5,2)  DEFAULT 0,
+      CLASSIFICATION  VARCHAR2(20),
+      EVAL_COMMENT    CLOB,
+      SAC_TRIGGERED   NUMBER(1)    DEFAULT 0,
       PAYMENT_IMPACT  VARCHAR2(40),
-      IP              VARCHAR2(50),
+      IP              VARCHAR2(60),
       USER_AGENT      VARCHAR2(500),
       CREATED_AT      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
     )`,
@@ -794,19 +572,62 @@ const TABLES: Array<{ name: string; ddl: string }> = [
   {
     name: "MONT_EVAL_ANSWERS",
     ddl: `CREATE TABLE MONT_EVAL_ANSWERS (
-      ID           VARCHAR2(36) PRIMARY KEY,
-      RESPONSE_ID  VARCHAR2(36) NOT NULL,
-      QUESTION_ID  VARCHAR2(36) NOT NULL,
+      ID           VARCHAR2(36)  PRIMARY KEY,
+      RESPONSE_ID  VARCHAR2(36)  NOT NULL,
+      QUESTION_ID  VARCHAR2(36)  NOT NULL,
       VALUE_TEXT   VARCHAR2(4000),
-      VALUE_NUMBER NUMBER(5,2),
+      VALUE_NUMBER NUMBER(10,2),
       CREATED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
+  // ── Commission & notifications ────────────────────────────────────────────────
+  {
+    name: "MONT_ASSEMBLY_JOB_ITEMS",
+    ddl: `CREATE TABLE MONT_ASSEMBLY_JOB_ITEMS (
+      ID                VARCHAR2(36) PRIMARY KEY,
+      ASSEMBLY_JOB_ID   VARCHAR2(36) NOT NULL,
+      CODPROD           VARCHAR2(20) NOT NULL,
+      DESCRICAO         VARCHAR2(500),
+      QUANTITY          NUMBER(10,3) DEFAULT 1 NOT NULL,
+      VLMAODEOBRA       NUMBER(14,2) DEFAULT 0,
+      VALOR_UNITARIO    NUMBER(14,2) DEFAULT 0,
+      CALCULATED_AMOUNT NUMBER(14,2) DEFAULT 0,
+      RULE_SOURCE       VARCHAR2(40),
+      COMMISSION_PERCENT NUMBER(5,2),
+      CREATED_AT        TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
+    )`,
+  },
+  {
+    name: "MONT_DEPT_COMMISSIONS",
+    ddl: `CREATE TABLE MONT_DEPT_COMMISSIONS (
+      ID                 VARCHAR2(36) PRIMARY KEY,
+      CODEPTO            VARCHAR2(20) NOT NULL,
+      DESCRICAO          VARCHAR2(255),
+      COMMISSION_PERCENT NUMBER(5,2)  NOT NULL,
+      ACTIVE             NUMBER(1)    DEFAULT 1 NOT NULL,
+      NOTES              VARCHAR2(1000),
+      CREATED_BY         VARCHAR2(36),
+      UPDATED_BY         VARCHAR2(36),
+      CREATED_AT         TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      UPDATED_AT         TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+      CONSTRAINT UQ_MONT_DEPT_COMM_CODEPTO UNIQUE (CODEPTO)
+    )`,
+  },
+  {
+    name: "MONT_PROVIDER_NOTIFICATIONS",
+    ddl: `CREATE TABLE MONT_PROVIDER_NOTIFICATIONS (
+      ID          VARCHAR2(36) PRIMARY KEY,
+      PROVIDER_ID VARCHAR2(36) NOT NULL,
+      TYPE        VARCHAR2(60) NOT NULL,
+      TITLE       VARCHAR2(255),
+      BODY        VARCHAR2(2000),
+      READ_AT     TIMESTAMP,
+      CREATED_AT  TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
     )`,
   },
 ];
 
 const NEW_COLUMNS: ColumnDef[] = [
-  { table: "MONT_USERS", column: "TOKEN_VERSION",  ddl: "NUMBER DEFAULT 0 NOT NULL" },
-  { table: "MONT_USERS", column: "REVOKED_BEFORE", ddl: "TIMESTAMP" },
   { table: "MONT_ORDER_ITEMS", column: "ASSEMBLY_COST", ddl: "NUMBER(14,2) DEFAULT 0 NOT NULL" },
   { table: "MONT_SAC_CASES", column: "NEXT_ACTION_DATE", ddl: "TIMESTAMP" },
   { table: "MONT_SAC_CASES", column: "SLA_DEADLINE", ddl: "TIMESTAMP" },
@@ -826,45 +647,6 @@ const NEW_COLUMNS: ColumnDef[] = [
   { table: "MONT_MSG_TEMPLATES", column: "SEND_HOUR_END",   ddl: "NUMBER(2) DEFAULT 21" },
   // Montador histórico
   { table: "MONT_ASSEMBLY_JOBS", column: "NOTES", ddl: "VARCHAR2(2000)" },
-  // Commission calc type support
-  { table: "MONT_PRODUCT_COMMISSIONS", column: "CALCULATION_TYPE", ddl: "VARCHAR2(20) DEFAULT 'PERCENTAGE' NOT NULL" },
-  { table: "MONT_PRODUCT_COMMISSIONS", column: "FIXED_AMOUNT", ddl: "NUMBER(14,4)" },
-  // CEP para matching geográfico
-  { table: "MONT_PROVIDERS", column: "CEP", ddl: "VARCHAR2(10)" },
-  { table: "MONT_PROVIDERS", column: "TRADE_NAME", ddl: "VARCHAR2(255)" },
-  // Geo matching — coordenadas e raio de atuação
-  { table: "MONT_PROVIDERS", column: "LATITUDE",  ddl: "NUMBER(10,7)" },
-  { table: "MONT_PROVIDERS", column: "LONGITUDE", ddl: "NUMBER(10,7)" },
-  { table: "MONT_PROVIDERS", column: "RADIUS_KM", ddl: "NUMBER(7,2) DEFAULT 30" },
-  // MONT_ASSEMBLY_JOB_ITEMS — campos financeiros adicionais
-  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_UNITARIO",  ddl: "NUMBER(14,4)" },
-  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "VALOR_TOTAL_ITEM", ddl: "NUMBER(14,4)" },
-  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UNIDADE", ddl: "VARCHAR2(20)" },
-  { table: "MONT_ASSEMBLY_JOB_ITEMS", column: "UPDATED_AT", ddl: "TIMESTAMP DEFAULT SYSTIMESTAMP" },
-  // SENT_AT para notificações WhatsApp (coluna adicionada depois da criação inicial da tabela)
-  { table: "MONT_PROVIDER_NOTIFICATIONS", column: "SENT_AT", ddl: "TIMESTAMP" },
-  // Vigência de regras de comissão
-  { table: "MONT_PRODUCT_COMMISSIONS", column: "VIGENCIA_INICIO", ddl: "DATE" },
-  { table: "MONT_PRODUCT_COMMISSIONS", column: "VIGENCIA_FIM", ddl: "DATE" },
-  { table: "MONT_DEPT_COMMISSIONS", column: "VIGENCIA_INICIO", ddl: "DATE" },
-  { table: "MONT_DEPT_COMMISSIONS", column: "VIGENCIA_FIM", ddl: "DATE" },
-  // MONT_ASSEMBLY_REWORKS — campos completos de rastreabilidade
-  { table: "MONT_ASSEMBLY_REWORKS", column: "ORIGINAL_PROVIDER_ID", ddl: "VARCHAR2(36)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "NEW_PROVIDER_ID",      ddl: "VARCHAR2(36)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "NUMPED",               ddl: "VARCHAR2(50)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "CODCLI",               ddl: "VARCHAR2(50)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "SAC_CASE_ID",          ddl: "VARCHAR2(36)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "CLASSIFICATION",       ddl: "VARCHAR2(50)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "SEVERITY",             ddl: "VARCHAR2(20) DEFAULT 'MEDIA'" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "REQUIRES_RETURN",      ddl: "NUMBER(1) DEFAULT 0" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "AFFECTS_PROVIDER_SCORE", ddl: "NUMBER(1) DEFAULT 0" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "AFFECTS_PAYMENT",      ddl: "NUMBER(1) DEFAULT 0" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "PROCEDENTE",           ddl: "NUMBER(1)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "CUSTOMER_COMMENT",     ddl: "VARCHAR2(2000)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "SAC_COMMENT",          ddl: "VARCHAR2(2000)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "CREATED_BY",           ddl: "VARCHAR2(36)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "APPROVED_BY",          ddl: "VARCHAR2(36)" },
-  { table: "MONT_ASSEMBLY_REWORKS", column: "UPDATED_AT",           ddl: "TIMESTAMP DEFAULT SYSTIMESTAMP" },
 ];
 const INDEXES: IndexDef[] = [
   { name: "IDX_MONT_ORDERS_STATUS", table: "MONT_ORDERS", columns: "CURRENT_STATUS" },
@@ -885,41 +667,16 @@ const INDEXES: IndexDef[] = [
   { name: "IDX_MONT_MSGL_IDEMP",     table: "MONT_MESSAGE_LOGS",    columns: "IDEMPOTENCY_KEY", unique: true },
   { name: "IDX_MONT_SYNCRN_STATUS",  table: "MONT_SYNC_RUNS",       columns: "RUN_STATUS" },
   { name: "IDX_MONT_SAC_LOGS_CASE", table: "MONT_SAC_CASE_LOGS", columns: "SAC_CASE_ID" },
-  { name: "IDX_MONT_PAY_LOGS_PMT",      table: "MONT_PAYMENT_APPROVAL_LOGS", columns: "PAYMENT_ID" },
-  // Agenda candidatos indexes
-  { name: "IDX_MONT_CALCI_PAYMENT",     table: "MONT_COMMISSION_CALC_ITEMS", columns: "PAYMENT_ID" },
-  { name: "IDX_MONT_CALCI_NUMPED",      table: "MONT_COMMISSION_CALC_ITEMS", columns: "NUMPED" },
-  { name: "IDX_MONT_AGCAND_STATUS",     table: "MONT_AGENDA_CANDIDATOS", columns: "STATUS_AGENDA" },
-  { name: "IDX_MONT_AGCAND_CODCLI",     table: "MONT_AGENDA_CANDIDATOS", columns: "CODCLI" },
-  { name: "IDX_MONT_AGCAND_ENTREGA",    table: "MONT_AGENDA_CANDIDATOS", columns: "DATA_ENTREGA_CONFIRMADA" },
-  // Novos recursos
-  { name: "IDX_MONT_UNAVAIL_PROV",      table: "MONT_PROVIDER_UNAVAILABILITY", columns: "PROVIDER_ID, UNAVAIL_DATE", unique: true },
-  { name: "IDX_MONT_CERT_PROV",         table: "MONT_PROVIDER_CERTIFICATIONS", columns: "PROVIDER_ID" },
-  { name: "IDX_MONT_CERT_VALID",        table: "MONT_PROVIDER_CERTIFICATIONS", columns: "VALID_UNTIL" },
-  { name: "IDX_MONT_REWORK_JOB",        table: "MONT_ASSEMBLY_REWORKS", columns: "ASSEMBLY_JOB_ID" },
-  { name: "IDX_MONT_REWORK_PROV",       table: "MONT_ASSEMBLY_REWORKS", columns: "PROVIDER_ID" },
-  { name: "IDX_MONT_UFILIAIS_USER",     table: "MONT_USER_FILIAIS", columns: "USER_ID" },
-  // PIX indexes
-  { name: "IDX_MONT_PIX_PMT_PROV",     table: "MONT_PIX_PAYMENT_REQUESTS", columns: "PROVIDER_ID" },
-  { name: "IDX_MONT_PIX_PMT_PPMT",     table: "MONT_PIX_PAYMENT_REQUESTS", columns: "PROVIDER_PAYMENT_ID" },
-  { name: "IDX_MONT_PIX_WH_EXTID",     table: "MONT_PIX_PAYMENT_WEBHOOKS", columns: "EXTERNAL_PAYMENT_ID" },
-  { name: "IDX_MONT_PPA_PROV",         table: "MONT_PROVIDER_PAYMENT_ACCOUNTS", columns: "PROVIDER_ID" },
-  // Assembly job items
-  { name: "IDX_MONT_AJI_CODPROD",      table: "MONT_ASSEMBLY_JOB_ITEMS", columns: "CODPROD" },
-  // Provider notifications
-  { name: "IDX_MONT_PROVNOTIF_PROV",   table: "MONT_PROVIDER_NOTIFICATIONS", columns: "PROVIDER_ID" },
-  { name: "IDX_MONT_PROVNOTIF_JOB",    table: "MONT_PROVIDER_NOTIFICATIONS", columns: "ASSEMBLY_JOB_ID" },
-  { name: "IDX_MONT_PROVNOTIF_SENT",   table: "MONT_PROVIDER_NOTIFICATIONS", columns: "SENT_AT" },
-  // Eval configs + questions
-  { name: "IDX_MONT_EVALQ_CONFIG",     table: "MONT_EVAL_QUESTIONS", columns: "CONFIG_ID, POSITION" },
-  // Eval links
-  { name: "IDX_MONT_EVALLINK_TOKEN",   table: "MONT_EVAL_LINKS", columns: "TOKEN", unique: true },
-  { name: "IDX_MONT_EVALLINK_ORDER",   table: "MONT_EVAL_LINKS", columns: "ORDER_ID" },
-  { name: "IDX_MONT_EVALLINK_PHASE",   table: "MONT_EVAL_LINKS", columns: "PHASE" },
-  // Eval responses + answers
-  { name: "IDX_MONT_EVALRESP_LINK",    table: "MONT_EVAL_RESPONSES", columns: "LINK_ID" },
-  { name: "IDX_MONT_EVALRESP_ORDER",   table: "MONT_EVAL_RESPONSES", columns: "ORDER_ID" },
-  { name: "IDX_MONT_EVALANS_RESP",     table: "MONT_EVAL_ANSWERS", columns: "RESPONSE_ID" },
+  { name: "IDX_MONT_PAY_LOGS_PMT", table: "MONT_PAYMENT_APPROVAL_LOGS", columns: "PAYMENT_ID" },
+  // Eval module indexes
+  { name: "IDX_MONT_EVAL_Q_CONFIG",   table: "MONT_EVAL_QUESTIONS", columns: "CONFIG_ID" },
+  { name: "IDX_MONT_EVAL_R_PHASE",    table: "MONT_EVAL_RESPONSES", columns: "PHASE" },
+  { name: "IDX_MONT_EVAL_A_RESP",     table: "MONT_EVAL_ANSWERS",   columns: "RESPONSE_ID" },
+  { name: "IDX_MONT_EVAL_L_TOKEN",    table: "MONT_EVAL_LINKS",     columns: "TOKEN", unique: true },
+  { name: "IDX_MONT_NOTIF_PROVIDER",  table: "MONT_PROVIDER_NOTIFICATIONS", columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_JOBITEMS_JOB",    table: "MONT_ASSEMBLY_JOB_ITEMS",     columns: "ASSEMBLY_JOB_ID" },
+  // CC-07: garantir pagamento único por montagem (evita duplicatas)
+  { name: "UQ_MONT_PAY_ASSEMBLY_JOB", table: "MONT_PROVIDER_PAYMENTS", columns: "ASSEMBLY_JOB_ID", unique: true },
 ];
 
 async function tableExists(tableName: string): Promise<boolean> {
@@ -971,28 +728,6 @@ async function ensureColumn(def: ColumnDef): Promise<void> {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes("ORA-01430") || msg.includes("ORA-01031")) return;
     throw error;
-  }
-}
-
-async function constraintExists(name: string): Promise<boolean> {
-  const row = await queryOne<{ cnt: number }>(
-    "SELECT COUNT(*) AS CNT FROM USER_CONSTRAINTS WHERE CONSTRAINT_NAME = :name",
-    { name: name.toUpperCase() },
-  );
-  return Number(row?.cnt ?? 0) > 0;
-}
-
-async function addFkIfMissing(constraintName: string, table: string, column: string, refTable: string, refColumn: string): Promise<void> {
-  if (await constraintExists(constraintName)) return;
-  try {
-    await execDml(
-      `ALTER TABLE ${table} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${column}) REFERENCES ${refTable} (${refColumn})`,
-    );
-    console.log(`[initTables] FK ${constraintName} adicionada.`);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes("ORA-02264") || msg.includes("ORA-01031") || msg.includes("ORA-02275")) return;
-    console.warn(`[initTables] FK ${constraintName} ignorada: ${msg.slice(0, 120)}`);
   }
 }
 
@@ -1063,19 +798,34 @@ async function seedDefaultData(): Promise<void> {
     console.log(`[initTables] Admin seed criado: ${adminEmail}`);
   }
 
+  // Seed usuário Cleiton
+  const cleitonEmail = "cleiton.ramos@hotmail.com";
+  const cleitonExists = await queryOne<{ cnt: number }>(
+    "SELECT COUNT(*) AS CNT FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)",
+    { email: cleitonEmail },
+  );
+  if (Number(cleitonExists?.cnt ?? 0) === 0) {
+    const userId = uuid();
+    const hash = createHash("sha256")
+      .update(`123456:montadores:${config.jwtSecret}`)
+      .digest("hex");
+    await execDml(
+      "INSERT INTO MONT_USERS (ID, NAME, EMAIL, PASSWORD_HASH, STATUS) VALUES (:id, :name, :email, :hash, 'ATIVO')",
+      { id: userId, name: "Cleiton Ramos", email: cleitonEmail, hash },
+    );
+    const adminRole = await queryOne<{ id: string }>(
+      "SELECT ID FROM MONT_ROLES WHERE NAME = :name",
+      { name: "ADMIN" },
+    );
+    if (adminRole) {
+      await execDml(
+        "INSERT INTO MONT_USER_ROLES (USER_ID, ROLE_ID) VALUES (:userId, :roleId)",
+        { userId, roleId: adminRole.id },
+      );
+    }
+    console.log(`[initTables] Usuário Cleiton seed criado: ${cleitonEmail}`);
+  }
 }
-
-const FK_CONSTRAINTS: Array<{ name: string; table: string; column: string; refTable: string; refColumn: string }> = [
-  { name: "FK_MONT_UR_USER",   table: "MONT_USER_ROLES",            column: "USER_ID",         refTable: "MONT_USERS",              refColumn: "ID" },
-  { name: "FK_MONT_UR_ROLE",   table: "MONT_USER_ROLES",            column: "ROLE_ID",         refTable: "MONT_ROLES",              refColumn: "ID" },
-  { name: "FK_MONT_ORD_CUST",  table: "MONT_ORDERS",                column: "CUSTOMER_ID",     refTable: "MONT_CUSTOMERS",          refColumn: "ID" },
-  { name: "FK_MONT_AJI_JOB",   table: "MONT_ASSEMBLY_JOB_ITEMS",   column: "ASSEMBLY_JOB_ID", refTable: "MONT_ASSEMBLY_JOBS",      refColumn: "ID" },
-  { name: "FK_MONT_PAYM_JOB",  table: "MONT_PROVIDER_PAYMENTS",     column: "ASSEMBLY_JOB_ID", refTable: "MONT_ASSEMBLY_JOBS",      refColumn: "ID" },
-  { name: "FK_MONT_CALCI_PMT", table: "MONT_COMMISSION_CALC_ITEMS",      column: "PAYMENT_ID",           refTable: "MONT_PROVIDER_PAYMENTS",      refColumn: "ID" },
-  { name: "FK_MONT_PRT_USER",  table: "MONT_PASSWORD_RESET_TOKENS",     column: "USER_ID",              refTable: "MONT_USERS",                  refColumn: "ID" },
-  { name: "FK_MONT_PIX_PMT",   table: "MONT_PIX_PAYMENT_REQUESTS",      column: "PROVIDER_PAYMENT_ID",  refTable: "MONT_PROVIDER_PAYMENTS",      refColumn: "ID" },
-  { name: "FK_MONT_PPA_PROV",  table: "MONT_PROVIDER_PAYMENT_ACCOUNTS", column: "PROVIDER_ID",          refTable: "MONT_PROVIDERS",              refColumn: "ID" },
-];
 
 export async function ensureMontadoresTables(): Promise<void> {
   if (!isOracleEnabled() || initialized) return;
@@ -1087,9 +837,6 @@ export async function ensureMontadoresTables(): Promise<void> {
   }
   for (const index of INDEXES) {
     await createIndexIfMissing(index);
-  }
-  for (const fk of FK_CONSTRAINTS) {
-    await addFkIfMissing(fk.name, fk.table, fk.column, fk.refTable, fk.refColumn);
   }
   await seedDefaultData();
   initialized = true;

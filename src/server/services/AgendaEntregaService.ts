@@ -2,7 +2,6 @@ import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { WinthorAgendaRepository } from "../oracle/WinthorAgendaRepository";
 import { MessageLogService } from "./MessageLogService";
-import { AssemblyEligibilityService } from "./AssemblyEligibilityService";
 
 export type AgendaStatusKey =
   | "AGUARDANDO_ENTREGA"
@@ -34,7 +33,7 @@ export type AgendaCandidato = {
 };
 
 export type SyncAgendaResult = {
-  modo: "DRY_RUN" | "PRODUCAO";
+  modo: "DRY_RUN" | "HOMOLOGACAO" | "PRODUCAO";
   totalEncontrados: number;
   aptosEntregues: number;
   convitesSimulados: number;
@@ -45,9 +44,8 @@ export type SyncAgendaResult = {
 
 export class AgendaEntregaService {
   constructor(
-    private readonly repo        = new WinthorAgendaRepository(),
-    private readonly msgLog      = new MessageLogService(),
-    private readonly eligibility = new AssemblyEligibilityService(),
+    private readonly repo   = new WinthorAgendaRepository(),
+    private readonly msgLog = new MessageLogService(),
   ) {}
 
   async list(params: {
@@ -61,8 +59,7 @@ export class AgendaEntregaService {
     const rows = await this.repo.queryByMontOrders({
       daysBack:           params.daysBack ?? 60,
       somenteEntregues:   params.somenteEntregues !== false,
-      somenteComMontagem: false,
-      somenteElegiveis:   params.somenteElegiveis !== false, // padrão: somente elegíveis
+      somenteComMontagem: false, // VLMAODEOBRA não existe neste WinThor; mostra todos os entregues
       codfilial:          params.codfilial ?? null,
       numped:             params.numped    ?? null,
     });
@@ -75,7 +72,7 @@ export class AgendaEntregaService {
       .map((r) => this._mapRow(r));
   }
 
-  async sync(params: { daysBack?: number; modo?: "DRY_RUN" | "PRODUCAO" } = {}): Promise<SyncAgendaResult> {
+  async sync(params: { daysBack?: number; modo?: "DRY_RUN" | "HOMOLOGACAO" | "PRODUCAO" } = {}): Promise<SyncAgendaResult> {
     const modo      = params.modo ?? "DRY_RUN";
     const daysBack  = params.daysBack ?? 60;
 
@@ -105,13 +102,6 @@ export class AgendaEntregaService {
         // Upsert into MONT_AGENDA_CANDIDATOS
         await this._upsertCandidato(row);
         result.aptosEntregues++;
-
-        // Skip orders with no commission-eligible products
-        const eligResult = await this.eligibility.checkEligibility(numped);
-        if (eligResult.dataSource === "winthor_pcpedi" && !eligResult.eligible) {
-          result.ignorados.push({ numped, motivo: "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM" });
-          continue;
-        }
 
         // Skip if already sent
         if (Number(row.convite_enviado) === 1) {
@@ -293,6 +283,10 @@ export class AgendaEntregaService {
        WHERE NUMPED = :numped`,
       { numped, dataEnvio },
     );
+  }
+
+  async migrateDryRunKeys(): Promise<{ migrated: number; message: string }> {
+    return { migrated: 0, message: "Chaves de idempotência já no formato canônico fluxo:numped:eventKey" };
   }
 
   private _mapRow(r: Awaited<ReturnType<typeof WinthorAgendaRepository.prototype.queryByMontOrders>>[number]): AgendaCandidato {

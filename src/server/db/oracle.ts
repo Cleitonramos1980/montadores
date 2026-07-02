@@ -23,7 +23,11 @@ export async function initOraclePool(): Promise<void> {
 }
 
 export function isOracleEnabled(): boolean {
-  return initialized && Boolean(config.oracle.user && config.oracle.password && config.oracle.connectString);
+  return Boolean(config.oracle.user && config.oracle.password && config.oracle.connectString);
+}
+
+export function isOraclePoolInitialized(): boolean {
+  return initialized;
 }
 
 export async function closeOraclePool(): Promise<void> {
@@ -40,19 +44,6 @@ export async function withOracleConnection<T>(handler: (connection: any) => Prom
   } finally {
     await connection.close();
   }
-}
-
-export async function withTransaction<T>(handler: (conn: any) => Promise<T>): Promise<T> {
-  return withOracleConnection(async (conn) => {
-    try {
-      const result = await handler(conn);
-      await conn.commit();
-      return result;
-    } catch (err) {
-      try { await conn.rollback(); } catch { /* ignore */ }
-      throw err;
-    }
-  });
 }
 
 export async function executeOracle<T = unknown>(

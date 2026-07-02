@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { ActionButton, LoadingState, Page, StatusBadge, useToast } from "../components/Ui";
-import { api, getToken } from "../lib/api";
-import { forceSync, getQueueStatus, isOnline, onSyncCompleted, type QueueStatus } from "../lib/offlineQueue";
+import { api } from "../lib/api";
 
 const STEPS = ["Agendada", "Iniciar", "Fotografar", "Finalizar"];
 
@@ -65,13 +64,10 @@ function ActiveJobDetail({
   onBack: () => void;
   onRefresh: () => void;
 }) {
-  const [photoFile, setPhotoFile]   = useState<File | null>(null);
-  const [preview, setPreview]       = useState<string | null>(null);
-  const [uploading, setUploading]   = useState(false);
+  const [photoUrl, setPhotoUrl] = useState("");
   const toast = useToast();
-  const photoCount = Number(job.photo_count);
-  const step = jobStep(job.status, photoCount);
-  const canFinish = job.status === "EM_EXECUCAO" && photoCount >= 2;
+  const step = jobStep(job.status, Number(job.photo_count));
+  const canFinish = job.status === "EM_EXECUCAO" && Number(job.photo_count) >= 1;
 
   async function doAction(action: "start" | "finish") {
     try {
@@ -85,38 +81,18 @@ function ActiveJobDetail({
   }
 
   async function addPhoto() {
-    if (!photoFile) return;
-    setUploading(true);
+    if (!photoUrl.trim()) return;
     try {
-      const formData = new FormData();
-      formData.append("file", photoFile);
-      const resp = await fetch("/api/upload", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: formData,
-      });
-      if (!resp.ok) throw new Error("Falha no upload da imagem.");
-      const { url } = await resp.json() as { url: string };
       await api(`/assembly/${job.id}/photos`, {
         method: "POST",
-        body: JSON.stringify({ fileUrl: url, photoType: "EVIDENCIA" }),
+        body: JSON.stringify({ fileUrl: photoUrl, photoType: "EVIDENCIA" }),
       });
-      setPhotoFile(null);
-      setPreview(null);
+      setPhotoUrl("");
       toast("Foto registrada.");
       onRefresh();
     } catch (err) {
       toast((err as Error).message, "error");
-    } finally {
-      setUploading(false);
     }
-  }
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setPhotoFile(file);
-    if (file) setPreview(URL.createObjectURL(file));
-    else setPreview(null);
   }
 
   return (
@@ -168,42 +144,23 @@ function ActiveJobDetail({
 
       {job.status === "EM_EXECUCAO" && (
         <div className="panel" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>
-            📷 Fotos de evidência
-            <span style={{ fontWeight: 400, fontSize: 13, color: "var(--text-muted)", marginLeft: 8 }}>
-              {photoCount}/2 mínimas
-            </span>
-          </h3>
-          {photoCount < 2 && (
+          <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>📷 Fotos de evidência</h3>
+          {Number(job.photo_count) === 0 && (
             <div style={{ background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: 6, padding: 12, marginBottom: 12, color: "var(--warn)", fontSize: 14 }}>
-              Adicione ao menos 2 fotos antes de finalizar. ({2 - photoCount} restante{2 - photoCount !== 1 ? "s" : ""})
+              Adicione ao menos 1 foto obrigatória antes de finalizar.
             </div>
           )}
-
-          <label style={{ display: "block", marginBottom: 10 }}>
-            <div style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 6 }}>Tirar foto ou selecionar da galeria</div>
+          <label style={{ display: "grid", gap: 6, fontSize: 14, color: "var(--text-secondary)", marginBottom: 12 }}>
+            URL da foto (link de compartilhamento)
             <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFileChange}
-              style={{ fontSize: 14, width: "100%" }}
+              value={photoUrl}
+              onChange={(e) => setPhotoUrl(e.target.value)}
+              placeholder="https://drive.google.com/... ou outro link"
+              style={{ fontSize: 16 }}
             />
           </label>
-
-          {preview && (
-            <div style={{ marginBottom: 12 }}>
-              <img src={preview} alt="preview" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 8, objectFit: "cover" }} />
-            </div>
-          )}
-
-          <ActionButton
-            onClick={addPhoto}
-            disabled={!photoFile || uploading}
-            className="ghostButton"
-            loadingLabel="Enviando foto..."
-          >
-            {uploading ? "Enviando..." : "📤 Enviar foto"}
+          <ActionButton onClick={addPhoto} disabled={!photoUrl.trim()} className="ghostButton" loadingLabel="Registrando...">
+            + Registrar foto
           </ActionButton>
 
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
@@ -212,7 +169,7 @@ function ActiveJobDetail({
             </ActionButton>
             {!canFinish && (
               <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 8 }}>
-                Adicione ao menos 2 fotos antes de finalizar.
+                Adicione ao menos 1 foto antes de finalizar.
               </p>
             )}
           </div>
@@ -395,117 +352,16 @@ function HistoryJobDetail({ job, onBack, onInvoiceSaved }: { job: any; onBack: (
   );
 }
 
-// ─── Dashboard summary card ───────────────────────────────────────────────────
-
-function DashboardCard({ weekJobs, pendingBalance, expiringDocs }: { weekJobs: number; pendingBalance: number; expiringDocs: number }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20, maxWidth: 700 }}>
-      <div className="panel" style={{ textAlign: "center", padding: "14px 10px" }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: "var(--brand)" }}>{weekJobs}</div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>montagens esta semana</div>
-      </div>
-      <div className="panel" style={{ textAlign: "center", padding: "14px 10px" }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "var(--brand)" }}>
-          {pendingBalance.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>saldo a receber</div>
-      </div>
-      <div className="panel" style={{ textAlign: "center", padding: "14px 10px", background: expiringDocs > 0 ? "var(--warn-bg)" : undefined }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: expiringDocs > 0 ? "var(--warn)" : "var(--ok)" }}>{expiringDocs}</div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>docs vencendo (30d)</div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Notificações ─────────────────────────────────────────────────────────────
-
-type NotificationItem = {
-  id: string;
-  type: string;
-  title: string;
-  body: string;
-  numped: string | null;
-  assembly_job_id: string | null;
-  read_at: string | null;
-  created_at: string;
-};
-
-function NotificationsPanel({
-  notifications,
-  loading,
-  onMarkRead,
-}: {
-  notifications: NotificationItem[];
-  loading: boolean;
-  onMarkRead: (id: string) => void;
-}) {
-  if (loading) return <div style={{ padding: 20, color: "var(--text-muted)", fontSize: 14 }}>Carregando...</div>;
-  if (notifications.length === 0) {
-    return (
-      <div className="emptyState">
-        <div className="emptyIcon">🔔</div>
-        <strong>Sem notificações</strong>
-        <p>Notificações de novas montagens aparecerão aqui.</p>
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: "grid", gap: 8, maxWidth: 700 }}>
-      {notifications.map((n) => (
-        <div
-          key={n.id}
-          style={{
-            background: n.read_at ? "var(--bg-secondary)" : "var(--bg-card)",
-            border: `1px solid ${n.read_at ? "var(--border)" : "var(--brand)"}`,
-            borderRadius: 8, padding: "12px 16px",
-            opacity: n.read_at ? 0.7 : 1,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: n.read_at ? "var(--text-secondary)" : "var(--text-primary)" }}>
-                {n.title}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4, whiteSpace: "pre-line" }}>
-                {n.body}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-                {fmtDatetime(n.created_at)}
-              </div>
-            </div>
-            {!n.read_at && (
-              <button
-                className="ghostButton"
-                style={{ fontSize: 12, flexShrink: 0 }}
-                onClick={() => onMarkRead(n.id)}
-              >
-                Marcar lida
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function ProviderAppPage() {
-  const [tab, setTab] = useState<"ativas" | "notificacoes" | "historico">("ativas");
+  const [tab, setTab] = useState<"ativas" | "historico">("ativas");
   const [jobs, setJobs] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loadingNotif, setLoadingNotif] = useState(false);
   const [selected, setSelected] = useState<any>(null);
   const [historySelected, setHistorySelected] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [dashboard, setDashboard] = useState<{ weekJobs: number; pendingBalance: number; expiringDocs: number } | null>(null);
-  const [online, setOnline] = useState(isOnline());
-  const [queueStatus, setQueueStatus] = useState<QueueStatus>({ pendingActions: 0, pendingPhotos: 0 });
   const toast = useToast();
 
   const loadActive = async () => {
@@ -539,47 +395,7 @@ export function ProviderAppPage() {
     }
   };
 
-  const loadNotifications = async () => {
-    setLoadingNotif(true);
-    try {
-      const data = await api<{ rows: NotificationItem[]; unread: number }>("/provider-notifications");
-      setNotifications(data.rows);
-      setUnreadCount(data.unread);
-    } catch {
-      // silently fail — notifications are non-critical
-    } finally {
-      setLoadingNotif(false);
-    }
-  };
-
-  const markNotifRead = async (id: string) => {
-    try {
-      await api(`/provider-notifications/${id}/read`, { method: "PATCH", body: "{}" });
-      setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
-      setUnreadCount((c) => Math.max(0, c - 1));
-    } catch { /* silently */ }
-  };
-
-  useEffect(() => {
-    void loadActive();
-    void loadNotifications();
-    api<{ weekJobs: number; pendingBalance: number; expiringDocs: number }>("/assembly/provider/dashboard")
-      .then(setDashboard)
-      .catch(() => {});
-
-    // Monitora status online/offline e fila pendente
-    const handleOnline  = () => { setOnline(true);  void getQueueStatus().then(setQueueStatus); };
-    const handleOffline = () => setOnline(false);
-    window.addEventListener("online",  handleOnline);
-    window.addEventListener("offline", handleOffline);
-    void getQueueStatus().then(setQueueStatus);
-    const unsubSync = onSyncCompleted(() => void getQueueStatus().then(setQueueStatus));
-    return () => {
-      window.removeEventListener("online",  handleOnline);
-      window.removeEventListener("offline", handleOffline);
-      unsubSync();
-    };
-  }, []);
+  useEffect(() => { void loadActive(); }, []);
 
   useEffect(() => {
     if (tab === "historico" && history.length === 0) void loadHistory();
@@ -611,56 +427,27 @@ export function ProviderAppPage() {
     );
   }
 
-  const pendingTotal = queueStatus.pendingActions + queueStatus.pendingPhotos;
-
   return (
     <Page title="Portal do Montador" subtitle="Suas montagens e histórico completo">
-      {/* Banner de status offline */}
-      {!online && (
-        <div style={{ background: "#ff6f00", color: "#fff", padding: "8px 14px", borderRadius: 6, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Sem internet — ações serão sincronizadas quando voltar a conectar.</span>
-          {pendingTotal > 0 && <span style={{ fontWeight: 700 }}>{pendingTotal} pendente(s)</span>}
-        </div>
-      )}
-      {online && pendingTotal > 0 && (
-        <div style={{ background: "#e8f5e9", border: "1px solid var(--brand)", color: "var(--brand)", padding: "8px 14px", borderRadius: 6, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>{pendingTotal} ação(ões) offline aguardando sincronização.</span>
-          <button className="ghostButton" onClick={() => { forceSync(); void getQueueStatus().then(setQueueStatus); }}>
-            Sincronizar agora
-          </button>
-        </div>
-      )}
-      {dashboard && (
-        <DashboardCard
-          weekJobs={dashboard.weekJobs}
-          pendingBalance={dashboard.pendingBalance}
-          expiringDocs={dashboard.expiringDocs}
-        />
-      )}
       {/* Tabs + link para histórico analítico */}
       <div style={{ display: "flex", alignItems: "center", gap: 0, borderBottom: "2px solid var(--border)", marginBottom: 20 }}>
-        {([
-          { key: "ativas",       label: `Ativas (${active.length})` },
-          { key: "notificacoes", label: unreadCount > 0 ? `Notificações (${unreadCount})` : "Notificações" },
-          { key: "historico",    label: `Histórico (${history.length})` },
-        ] as const).map((t) => (
+        {(["ativas", "historico"] as const).map((t) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={t}
+            onClick={() => setTab(t)}
             style={{
-              padding: "10px 20px",
+              padding: "10px 24px",
               border: "none",
               background: "transparent",
-              borderBottom: tab === t.key ? "2px solid var(--brand)" : "2px solid transparent",
+              borderBottom: tab === t ? "2px solid var(--brand)" : "2px solid transparent",
               marginBottom: -2,
-              fontWeight: tab === t.key ? 700 : 400,
-              color: tab === t.key ? "var(--brand)" : t.key === "notificacoes" && unreadCount > 0 ? "var(--warn)" : "var(--text-secondary)",
+              fontWeight: tab === t ? 700 : 400,
+              color: tab === t ? "var(--brand)" : "var(--text-secondary)",
               cursor: "pointer",
-              fontSize: 14,
-              position: "relative",
+              fontSize: 15,
             }}
           >
-            {t.label}
+            {t === "ativas" ? `Ativas (${active.length})` : `Histórico (${history.length})`}
           </button>
         ))}
         <a
@@ -730,15 +517,6 @@ export function ProviderAppPage() {
             })}
           </div>
         )
-      )}
-
-      {/* Aba: Notificações */}
-      {tab === "notificacoes" && (
-        <NotificationsPanel
-          notifications={notifications}
-          loading={loadingNotif}
-          onMarkRead={markNotifRead}
-        />
       )}
 
       {/* Aba: Histórico */}

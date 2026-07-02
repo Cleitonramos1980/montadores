@@ -98,13 +98,6 @@ export function ProvidersPage() {
                 <td>{provider.active ? "Sim" : "Não"}</td>
                 <td>
                   <div className="actionsRow">
-                    <a
-                      href={`/montadores/prestadores/${provider.id}/perfil`}
-                      className="ghostButton"
-                      style={{ fontSize: 13, textDecoration: "none" }}
-                    >
-                      Perfil
-                    </a>
                     <button className="ghostButton" style={{ fontSize: 13 }} onClick={() => setSelected(selected?.id === provider.id ? null : provider)}>
                       {selected?.id === provider.id ? "Fechar" : "Ações"}
                     </button>

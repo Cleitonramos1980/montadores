@@ -1,15 +1,10 @@
 import { v4 as uuid } from "uuid";
+import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { EventService } from "./EventService";
-import { AssemblyEligibilityService } from "./AssemblyEligibilityService";
-import { ProviderNotificationService } from "./ProviderNotificationService";
 
 export class SchedulingService {
-  constructor(
-    private readonly events = new EventService(),
-    private readonly eligibility = new AssemblyEligibilityService(),
-    private readonly providerNotifications = new ProviderNotificationService(),
-  ) {}
+  constructor(private readonly events = new EventService()) {}
 
   async availableSlots(orderId: string) {
     const providers = await queryRows<{ id: string; name: string; capacity_per_day: number }>(
@@ -20,37 +15,20 @@ export class SchedulingService {
       const date = new Date(Date.now() + (i + 1) * 24 * 60 * 60 * 1000);
       return date.toISOString().slice(0, 10);
     });
-
-    const [bookedSlots, unavailability] = await Promise.all([
-      queryRows<{ provider_id: string; scheduled_date: string; scheduled_period: string }>(
-        `SELECT PROVIDER_ID, SCHEDULED_DATE, SCHEDULED_PERIOD
-         FROM MONT_ASSEMBLY_SCHEDULES
-         WHERE SCHEDULED_DATE >= :firstDay AND STATUS != 'CANCELADA'`,
-        { firstDay: days[0] },
-      ),
-      queryRows<{ provider_id: string; unavail_date: string }>(
-        `SELECT PROVIDER_ID, TO_CHAR(UNAVAIL_DATE, 'YYYY-MM-DD') AS UNAVAIL_DATE
-         FROM MONT_PROVIDER_UNAVAILABILITY
-         WHERE UNAVAIL_DATE >= TO_DATE(:firstDay, 'YYYY-MM-DD')`,
-        { firstDay: days[0] },
-      ).catch(() => [] as { provider_id: string; unavail_date: string }[]),
-    ]);
-
-    const bookedSet   = new Set(bookedSlots.map((s) => `${s.provider_id}:${s.scheduled_date}:${s.scheduled_period}`));
-    const unavailSet  = new Set(unavailability.map((u) => `${u.provider_id}:${u.unavail_date}`));
-
     return days.flatMap((date) =>
       providers.flatMap((provider) =>
-        (["MANHA", "TARDE"] as const).flatMap((period) => {
-          if (bookedSet.has(`${provider.id}:${date}:${period}`)) return [];
-          if (unavailSet.has(`${provider.id}:${date}`)) return [];
-          return [{ orderId, providerId: provider.id, providerName: provider.name, date, period }];
-        }),
+        ["MANHA", "TARDE"].map((period) => ({
+          orderId,
+          providerId: provider.id,
+          providerName: provider.name,
+          date,
+          period,
+        })),
       ),
     );
   }
 
-  async schedule(orderId: string, providerId: string, date: string, period: string, origin: "CLIENTE" | "OPERACAO" = "OPERACAO") {
+  async schedule(orderId: string, providerId: string, date: string, period: string) {
     const provider = await queryOne(
       "SELECT * FROM MONT_PROVIDERS WHERE ID = :id AND STATUS = 'APROVADO' AND ACTIVE = 1 AND DOCUMENTS_VALIDATED = 1",
       { id: providerId },
@@ -61,51 +39,7 @@ export class SchedulingService {
       "SELECT ID, NUMPED, CODCLI FROM MONT_ORDERS WHERE ID = :id",
       { id: orderId },
     );
-    if (!order) throw new Error("Pedido não encontrado.");
-
-    // Block scheduling if no products have active commission rules
-    const eligResult = await this.eligibility.checkEligibility(order.numped);
-    if (eligResult.dataSource === "winthor_pcpedi" && !eligResult.eligible) {
-      throw new Error(
-        `Pedido ${order.numped} não possui produtos com comissão de montagem configurada. Configure as regras em Comissões antes de agendar.`,
-      );
-    }
-
-    // Cancel any existing active job + schedule for this order (reagendamento gracioso)
-    const existingJob = await queryOne<{ id: string; schedule_id: string | null }>(
-      `SELECT ID, SCHEDULE_ID FROM MONT_ASSEMBLY_JOBS
-       WHERE ORDER_ID = :orderId AND STATUS NOT IN ('CANCELADA', 'FINALIZADA')
-       FETCH FIRST 1 ROWS ONLY`,
-      { orderId },
-    );
-    if (existingJob) {
-      await execDml(
-        "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'CANCELADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-        { id: existingJob.id },
-      );
-      if (existingJob.schedule_id) {
-        await execDml(
-          "UPDATE MONT_ASSEMBLY_SCHEDULES SET STATUS = 'CANCELADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-          { id: existingJob.schedule_id },
-        );
-      }
-      await execDml(
-        `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'CANCELADO', UPDATED_AT = SYSTIMESTAMP
-         WHERE ASSEMBLY_JOB_ID = :jobId AND STATUS NOT IN ('PAGO')`,
-        { jobId: existingJob.id },
-      );
-    }
-
-    // Remove any previously cancelled schedule for this provider+date+period
-    // so the unique constraint (PROVIDER_ID, SCHEDULED_DATE, SCHEDULED_PERIOD) does not block the new INSERT.
-    await execDml(
-      `DELETE FROM MONT_ASSEMBLY_SCHEDULES
-       WHERE PROVIDER_ID = :providerId
-         AND SCHEDULED_DATE = :scheduledDate
-         AND SCHEDULED_PERIOD = :scheduledPeriod
-         AND STATUS = 'CANCELADA'`,
-      { providerId, scheduledDate: date, scheduledPeriod: period },
-    );
+    if (!order) throw new AppError("Pedido não encontrado.", 404, "NOT_FOUND");
 
     const scheduleId = uuid();
     await execDml(
@@ -121,41 +55,14 @@ export class SchedulingService {
       { id: jobId, orderId, scheduleId, providerId },
     );
 
-    // Payment amount comes from commission rules × PCPEDI quantities (calculated during eligibility check).
-    // Fallback to 0 only when Oracle is offline and no commission data is available.
-    const amount = eligResult.dataSource === "winthor_pcpedi"
-      ? (eligResult.totalEstimatedCommission ?? 0)
-      : 0;
-
-    // Record eligible products for this assembly job
-    if (eligResult.eligibleProducts?.length) {
-      for (const ep of eligResult.eligibleProducts) {
-        await execDml(
-          `INSERT INTO MONT_ASSEMBLY_JOB_ITEMS
-             (ID, ASSEMBLY_JOB_ID, CODPROD, DESCRICAO, QUANTITY, RULE_SOURCE,
-              COMMISSION_PERCENT, FIXED_AMOUNT, CALCULATED_AMOUNT,
-              VALOR_UNITARIO, VALOR_TOTAL_ITEM, UNIDADE)
-           VALUES
-             (:id, :jobId, :codprod, :descricao, :qty, :ruleSource,
-              :commPct, :fixedAmt, :calcAmt,
-              :valorUnitario, :valorTotal, :unidade)`,
-          {
-            id: uuid(),
-            jobId,
-            codprod: Number(ep.codprod),
-            descricao: ep.descricao ?? null,
-            qty: ep.quantity,
-            ruleSource: ep.ruleSource,
-            commPct: ep.commissionPercent ?? null,
-            fixedAmt: ep.fixedAmount ?? null,
-            calcAmt: ep.estimatedCommission,
-            valorUnitario: ep.pvenda ?? null,
-            valorTotal: ep.pvenda != null ? ep.pvenda * ep.quantity : null,
-            unidade: ep.unidade ?? null,
-          },
-        );
-      }
-    }
+    // Calculate assembly cost from VLMAODEOBRA stored in ASSEMBLY_COST column
+    const costRow = await queryOne<{ total: number }>(
+      `SELECT COALESCE(SUM(QUANTITY * ASSEMBLY_COST), 0) AS TOTAL
+       FROM MONT_ORDER_ITEMS
+       WHERE ORDER_ID = :orderId AND REQUIRES_ASSEMBLY = 1`,
+      { orderId },
+    );
+    const amount = Number(costRow?.total ?? 0) > 0 ? Number(costRow!.total) : 120;
 
     await execDml(
       `INSERT INTO MONT_PROVIDER_PAYMENTS (ID, PROVIDER_ID, ASSEMBLY_JOB_ID, AMOUNT, STATUS)
@@ -175,24 +82,10 @@ export class SchedulingService {
       codcli: order.codcli,
       assemblyId: jobId,
       providerId,
-      origin,
+      origin: "CLIENTE",
       metadata: { description: `Montagem agendada para ${date} (${period}).`, amount },
       idempotencyKey: `montagem-agendada:${order.numped}:${date}:${period}`,
     });
-
-    // Notify montador (DRY_RUN — never sends real WhatsApp per system policy)
-    const customer = await queryOne<{ name: string }>(
-      `SELECT c.NAME FROM MONT_CUSTOMERS c JOIN MONT_ORDERS o ON o.CUSTOMER_ID = c.ID WHERE o.ID = :id`,
-      { id: orderId },
-    ).catch(() => null);
-    this.providerNotifications.notifyNewJob({
-      providerId,
-      assemblyJobId: jobId,
-      numped: order.numped,
-      scheduledDate: date,
-      scheduledPeriod: period,
-      customerName: customer?.name ?? "Cliente",
-    }).catch(() => {}); // non-blocking — observability only
 
     return { scheduleId, jobId, amount };
   }

@@ -1,7 +1,8 @@
 import { v4 as uuid } from "uuid";
+import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 
-export type EvalQuestionType = "SCALE" | "STARS" | "TEXT" | "SINGLE_CHOICE" | "YES_NO";
+export type EvalQuestionType = "SCALE" | "STARS" | "TEXT" | "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "YES_NO";
 
 export type EvalQuestion = {
   id: string;
@@ -142,7 +143,7 @@ export class EvaluationConfigService {
       "SELECT ID FROM MONT_EVAL_CONFIGS WHERE ID = :id",
       { id: configId },
     );
-    if (!config) throw new Error("Configuração de avaliação não encontrada.");
+    if (!config) throw new AppError("Configuração de avaliação não encontrada.", 404, "NOT_FOUND");
 
     const maxPos = await queryOne<{ mx: number }>(
       "SELECT MAX(POSITION) AS MX FROM MONT_EVAL_QUESTIONS WHERE CONFIG_ID = :configId AND ACTIVE = 1",
@@ -242,7 +243,7 @@ export class EvaluationConfigService {
 
   private _mapQuestion(row: any): EvalQuestion {
     let options: string[] | null = null;
-    try { options = row.options_json ? JSON.parse(row.options_json as string) : null; } catch { /* */ }
+    try { options = row.options_json ? JSON.parse(row.options_json as string) : null; } catch { console.warn(`[EvaluationConfigService] options_json inválido para questão ${row.id as string}`); }
     return {
       id: row.id as string,
       configId: row.config_id as string,

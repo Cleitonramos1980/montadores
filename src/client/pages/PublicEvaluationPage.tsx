@@ -453,6 +453,52 @@ function SingleChoiceInput({ question, value, onChange }: {
   );
 }
 
+// ─── Multiple choice (checkboxes) ─────────────────────────────────────────────
+function MultipleChoiceInput({ question, value, onChange }: {
+  question: EvalQuestion; value: string | null; onChange: (v: string) => void;
+}) {
+  const options = question.options ?? [];
+  const selected: string[] = (() => {
+    try { return value ? JSON.parse(value) : []; } catch { return []; }
+  })();
+
+  function toggle(opt: string) {
+    const next = selected.includes(opt)
+      ? selected.filter((o) => o !== opt)
+      : [...selected, opt];
+    onChange(JSON.stringify(next));
+  }
+
+  return (
+    <div>
+      {options.map((opt) => {
+        const checked = selected.includes(opt);
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            aria-pressed={checked}
+            className={`eval-choice-opt${checked ? " selected-pos" : ""}`}
+          >
+            <span
+              className="eval-radio-dot"
+              style={{
+                borderColor: checked ? C.action : C.border,
+                background: checked ? C.action : "transparent",
+                borderRadius: 4,
+              }}
+            >
+              {checked && <span className="eval-radio-inner" />}
+            </span>
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Form ─────────────────────────────────────────────────────────────────────
 function EvalForm({
   linkInfo,
@@ -496,6 +542,18 @@ function EvalForm({
       if (["TEXT", "YES_NO", "SINGLE_CHOICE"].includes(q.type) && !a?.text?.trim()) {
         setValidationMsg(`Por favor, responda: "${q.label}"`);
         return;
+      }
+      if (q.type === "MULTIPLE_CHOICE") {
+        try {
+          const sel = a?.text ? JSON.parse(a.text) : [];
+          if (!Array.isArray(sel) || sel.length === 0) {
+            setValidationMsg(`Por favor, selecione ao menos uma opção: "${q.label}"`);
+            return;
+          }
+        } catch {
+          setValidationMsg(`Por favor, responda: "${q.label}"`);
+          return;
+        }
       }
     }
     if (commentRequired && !comment.trim()) {
@@ -566,6 +624,13 @@ function EvalForm({
               )}
               {q.type === "SINGLE_CHOICE" && (
                 <SingleChoiceInput
+                  question={q}
+                  value={a?.text ?? null}
+                  onChange={(v) => setAnswer(q.id, { text: v })}
+                />
+              )}
+              {q.type === "MULTIPLE_CHOICE" && (
+                <MultipleChoiceInput
                   question={q}
                   value={a?.text ?? null}
                   onChange={(v) => setAnswer(q.id, { text: v })}

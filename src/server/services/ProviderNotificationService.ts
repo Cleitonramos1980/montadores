@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { features } from "../config";
+import { WhatsAppProviderService, normalizePhone } from "./WhatsAppProviderService";
 
 export type ProviderNotificationType = "NOVA_MONTAGEM_AGENDADA_MONTADOR";
 
@@ -80,11 +80,40 @@ export class ProviderNotificationService {
     const title = "Nova montagem agendada";
     const body = `Pedido ${numped} — ${customerName}\n${dateFormatted} (${periodLabel})\nAcesse o app para ver detalhes.`;
 
-    // Real channel dispatch (only when feature flags enabled)
-    // ENABLE_PROVIDER_WHATSAPP_NOTIFICATIONS=true → send via WhatsApp provider
-    // ENABLE_PROVIDER_PUSH_NOTIFICATIONS=true → send push notification
-    // Both flags false → DRY_RUN only (system policy default)
-    const isDryRun = !features.providerWhatsAppNotifications && !features.providerPushNotifications;
+    // ── HOMOLOGACAO / DRY_RUN guard ─────────────────────────────────────────
+    // Aplica a mesma trava de destino forçado do MessageTriggerService.
+    // NUNCA chama o provider com o telefone real do montador em modo controlado.
+    const globalModeRow = await queryOne<{ config_value: string }>(
+      "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'MESSAGE_TRIGGER_MODE'",
+    ).catch(() => null);
+    const globalMode = globalModeRow?.config_value ?? "DRY_RUN";
+
+    // Feature flags + modo global determinam o que acontece
+    const isDryRun =
+      globalMode === "DRY_RUN" ||
+      (!features.providerWhatsAppNotifications && !features.providerPushNotifications);
+
+    let effectiveTo: string | null = null;
+    let modoEnvio = "DRY_RUN";
+
+    if (!isDryRun) {
+      if (globalMode === "HOMOLOGACAO") {
+        // Redireciona para CODCLI 347818 — bloqueia telefone original do montador
+        const pilotCfg = await queryOne<{ config_value: string }>(
+          "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'HOMOLOGACAO_PILOT_PHONE'",
+        ).catch(() => null);
+        effectiveTo = pilotCfg?.config_value?.trim() ?? null;
+        modoEnvio   = "HOMOLOGACAO";
+        if (!effectiveTo) {
+          console.warn("[ProviderNotification] HOMOLOGACAO sem HOMOLOGACAO_PILOT_PHONE configurado — simulando");
+          modoEnvio = "DRY_RUN";
+        }
+      } else {
+        // PRODUCAO: usa o telefone real do montador
+        effectiveTo = normalizePhone(phone);
+        modoEnvio   = "PRODUCAO";
+      }
+    }
 
     const notificationId = uuid();
     await execDml(
@@ -101,34 +130,30 @@ export class ProviderNotificationService {
         assemblyJobId,
         numped,
         key: idempotencyKey,
-        dryRun: isDryRun ? 1 : 0,
+        dryRun: modoEnvio !== "PRODUCAO" ? 1 : 0,
       },
     );
 
-    if (isDryRun) {
+    if (modoEnvio === "DRY_RUN" || !effectiveTo) {
       return { status: "SIMULADO_DRY_RUN", notificationId };
     }
 
-    // WhatsApp channel (configure WHATSAPP_API_URL + WHATSAPP_API_TOKEN to activate)
-    if (features.providerWhatsAppNotifications) {
-      const apiUrl  = process.env.WHATSAPP_API_URL;
-      const apiToken = process.env.WHATSAPP_API_TOKEN;
-      if (apiUrl && apiToken) {
-        try {
-          await fetch(apiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
-            body: JSON.stringify({ to: phone.replace(/\D/g, ""), message: `${title}\n\n${body}` }),
-          });
-          await execDml(
-            "UPDATE MONT_PROVIDER_NOTIFICATIONS SET SENT_AT = SYSTIMESTAMP WHERE ID = :id",
-            { id: notificationId },
-          );
-        } catch (err) {
-          console.error("[ProviderNotification] WhatsApp send error:", err);
-        }
+    // WhatsApp channel — effectiveTo já é o destino autorizado (original ou 347818)
+    if (features.providerWhatsAppNotifications && effectiveTo) {
+      const msgText =
+        modoEnvio === "HOMOLOGACAO"
+          ? `[TESTE MONTADOR — HOMOLOGAÇÃO]\nMontador original NÃO recebeu.\n────────────────\n${title}\n\n${body}`
+          : `${title}\n\n${body}`;
+
+      const wp = new WhatsAppProviderService();
+      const result = await wp.send({ to: effectiveTo, text: msgText, modo: "PRODUCAO" });
+      if (result.status === "ENVIADO") {
+        await execDml(
+          "UPDATE MONT_PROVIDER_NOTIFICATIONS SET SENT_AT = SYSTIMESTAMP WHERE ID = :id",
+          { id: notificationId },
+        );
       } else {
-        console.warn("[ProviderNotification] WHATSAPP_API_URL/TOKEN não configurados — notificação não enviada.");
+        console.error(`[ProviderNotification] WhatsApp send error (${modoEnvio}): ${result.error ?? result.status}`);
       }
     }
 

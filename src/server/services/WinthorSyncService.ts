@@ -37,26 +37,11 @@ export class WinthorSyncService {
       if (orderRows.length === 0) throw new Error("Pedido não localizado no WinThor.");
       const wOrder = orderRows[0] as Record<string, unknown>;
 
-      const codcliRaw = wOrder.CODCLI;
-      // Oracle NUMBER 0 and NULL both arrive as falsy — treat 0 as valid code "0"
-      let codcli = codcliRaw != null && codcliRaw !== "" ? String(codcliRaw) : "";
+      const codcli = String(wOrder.CODCLI ?? "");
       const posicao = String(wOrder.POSICAO ?? "").trim().toUpperCase();
 
-      // Fallback: when PCPEDC.CODCLI is NULL, try MONT_AGENDA_CANDIDATOS for this NUMPED
-      let agendaFallback: { codcli: string | null; nome_cliente: string | null; telefone: string | null } | null = null;
-      if (!codcli) {
-        agendaFallback = await queryOne<{ codcli: string | null; nome_cliente: string | null; telefone: string | null }>(
-          "SELECT CODCLI, NOME_CLIENTE, TELEFONE FROM MONT_AGENDA_CANDIDATOS WHERE NUMPED = :numped",
-          { numped },
-        ).catch(() => null);
-        if (agendaFallback?.codcli) codcli = agendaFallback.codcli;
-      }
-
-      // Last resort: synthetic key so the order is still schedulable
-      if (!codcli) codcli = `SEM_COD_${numped}`;
-
-      // 2. Sync customer from PCCLIENT (with agenda fallback data if needed)
-      const { customerId, city, uf } = await this.syncCustomer(codcli, agendaFallback);
+      // 2. Sync customer from PCCLIENT
+      const { customerId, city, uf } = await this.syncCustomer(codcli);
 
       // 3. Items from PCPEDI + PCPRODUT (assembly flag via VLMAODEOBRA)
       const items = (await this.adapter.getOrderItems(numped)) as Record<string, unknown>[];
@@ -98,8 +83,6 @@ export class WinthorSyncService {
       // 8. Re-sync order items (delete + insert to handle quantity/price changes)
       await execDml("DELETE FROM MONT_ORDER_ITEMS WHERE ORDER_ID = :orderId", { orderId });
       for (const item of items) {
-        const productId = this.s(item.CODPROD, "SEM_CODPROD");
-        const description = this.s(item.DESCRICAO, "Produto sem descrição");
         await execDml(
           `INSERT INTO MONT_ORDER_ITEMS
            (ID, ORDER_ID, PRODUCT_ID, DESCRIPTION, QUANTITY, REQUIRES_ASSEMBLY, ASSEMBLY_COST)
@@ -107,8 +90,8 @@ export class WinthorSyncService {
           {
             id: uuid(),
             orderId,
-            productId,
-            description,
+            productId: String(item.CODPROD ?? ""),
+            description: String(item.DESCRICAO ?? ""),
             quantity: Number(item.QT ?? 0),
             requiresAssembly: Number(item.REQUER_MONTAGEM ?? 0),
             assemblyCost: Number(item.VLMAODEOBRA ?? 0),
@@ -278,30 +261,13 @@ export class WinthorSyncService {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  /** In Oracle, empty string '' binds as NULL. Use this for every NOT NULL VARCHAR2 column. */
-  private s(val: unknown, fallback: string): string {
-    const v = val != null ? String(val).trim() : "";
-    return v || fallback;
-  }
+  private async syncCustomer(codcli: string): Promise<{ customerId: string; city: string; uf: string }> {
+    const clientRows = await this.adapter.getCustomerById(codcli);
+    const wc = (clientRows[0] as Record<string, unknown> | undefined) ?? null;
 
-  private async syncCustomer(
-    codcli: string,
-    fallback?: { codcli: string | null; nome_cliente: string | null; telefone: string | null } | null,
-  ): Promise<{ customerId: string; city: string; uf: string }> {
-    if (!codcli || codcli.trim() === "") throw new Error("CODCLI inválido ou nulo — não é possível criar o cliente.");
-
-    // Try to fetch from WinThor PCCLIENT — skip if codcli is a synthetic key
-    let wc: Record<string, unknown> | null = null;
-    if (!codcli.startsWith("SEM_COD_")) {
-      const clientRows = await this.adapter.getCustomerById(codcli).catch(() => []);
-      wc = (clientRows[0] as Record<string, unknown> | undefined) ?? null;
-    }
-
-    const name = this.s(wc?.CLIENTE ?? fallback?.nome_cliente, "Cliente WinThor");
-    const phone = wc?.TELENT || wc?.TELCELENT || fallback?.telefone
-      ? String(wc?.TELENT ?? wc?.TELCELENT ?? fallback?.telefone ?? "")
-      : null;
-    const document = wc?.CGCENT ? String(wc.CGCENT) : null;
+    const name = String(wc?.CLIENTE ?? "Cliente WinThor");
+    const phone = String(wc?.TELENT ?? wc?.TELCELENT ?? "");
+    const document = String(wc?.CGCENT ?? "");
     const email = wc?.EMAIL ? String(wc.EMAIL) : null;
     const city = String(wc?.MUNICENT ?? "");
     const uf = String(wc?.ESTENT ?? "");

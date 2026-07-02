@@ -74,10 +74,15 @@ export class EvaluationLinkService {
       },
     );
 
-    return { linkId, token, url: `/montadores/eval/${token}` };
+    const baseUrl = (process.env.APP_BASE_URL ?? "http://localhost:5173").replace(/\/$/, "");
+    return { linkId, token, url: `${baseUrl}/montadores/eval/${token}` };
   }
 
-  async getByToken(token: string): Promise<EvalLinkInfo | null> {
+  // requesterCodcli: when the caller is an unauthenticated customer using a public link,
+  // pass their CODCLI so we can verify the link was generated for them.
+  // Pass null to bypass the check (admin/internal callers).
+  // Returns null (→ 404) rather than throwing when CODCLI mismatches to avoid confirming existence.
+  async getByToken(token: string, requesterCodcli: string | null = null): Promise<EvalLinkInfo | null> {
     const link = await queryOne<any>(
       `SELECT ID, TOKEN, CONFIG_ID, ORDER_ID, ASSEMBLY_JOB_ID, NUMPED, CODCLI,
               PHASE, EXPIRES_AT, USED_AT
@@ -85,6 +90,9 @@ export class EvaluationLinkService {
       { token },
     );
     if (!link) return null;
+    if (requesterCodcli !== null && link.codcli !== null && String(link.codcli) !== String(requesterCodcli)) {
+      return null;
+    }
 
     const config = await this.evalConfigs.getById(link.config_id as string);
     if (!config) return null;

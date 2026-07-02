@@ -92,13 +92,10 @@ export function MessageTemplatesPage() {
   const [filter, setFilter]     = useState("TODOS");
   const toast = useToast();
 
-  const [oracleDown, setOracleDown] = useState(false);
-
   const load = async () => {
     try {
       const data = await api<TemplateRow[]>("/message-templates");
       setRows(data);
-      setOracleDown(data.every((r) => r.template === null) && data.length > 0);
     } catch (err) {
       toast((err as Error).message, "error");
     } finally {
@@ -167,11 +164,6 @@ export function MessageTemplatesPage() {
 
   return (
     <Page title="Configuração de Mensagens" subtitle="Régua de envio — cliente, fornecedor e notificações internas">
-      {oracleDown && (
-        <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#e65100" }}>
-          ⚠ Oracle indisponível — templates exibidos sem dados salvos. Salvar templates ficará indisponível até a conexão ser restaurada.
-        </div>
-      )}
       {loading ? (
         <LoadingState message="Carregando templates..." />
       ) : (

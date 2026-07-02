@@ -1,49 +1,7 @@
-/* ── Mazzard ──────────────────────────────────────────────────────────────────
-   Coloque os arquivos .woff2 em public/fonts/mazzard/ para ativar a fonte.
-   Enquanto ausentes, o browser usa o fallback Arial/system-ui.
-───────────────────────────────────────────────────────────────────────────── */
-@font-face {
-  font-family: 'Mazzard';
-  src: url('/fonts/mazzard/Mazzard-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Mazzard';
-  src: url('/fonts/mazzard/Mazzard-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Mazzard';
-  src: url('/fonts/mazzard/Mazzard-SemiBold.woff2') format('woff2');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Mazzard';
-  src: url('/fonts/mazzard/Mazzard-Bold.woff2') format('woff2');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Mazzard';
-  src: url('/fonts/mazzard/Mazzard-ExtraBold.woff2') format('woff2');
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
-
 :root {
-  --brand: #1F2855;
-  --brand-dark: #161E3F;
-  --brand-light: #EBF0F9;
-  --brand-action: #3563AD;
-  --brand-action-dark: #2A509A;
+  --brand: #176b87;
+  --brand-dark: #10576f;
+  --brand-light: #e7f4f8;
   --text: #18212f;
   --text-muted: #667085;
   --text-secondary: #475467;
@@ -64,7 +22,7 @@
 
   color: var(--text);
   background: var(--bg);
-  font-family: 'Mazzard', Arial, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.45;
   font-size: 15px;
 }
@@ -77,9 +35,10 @@ body {
   margin: 0;
 }
 
-button {
+button,
+.ghostButton {
   align-items: center;
-  background: var(--brand-action);
+  background: var(--brand);
   border: 0;
   border-radius: 6px;
   color: #fff;
@@ -90,63 +49,35 @@ button {
   font-weight: 600;
   gap: 6px;
   justify-content: center;
-  min-height: 40px;
-  padding: 0 18px;
+  min-height: 38px;
+  padding: 0 16px;
   text-decoration: none;
-  transition: background .15s, box-shadow .15s, opacity .15s;
+  transition: background .15s, opacity .15s;
   white-space: nowrap;
 }
 
-button:hover { background: var(--brand-action-dark); }
+button:hover,
+.ghostButton:hover { background: var(--brand-dark); }
 
-button:disabled {
+button:disabled,
+.ghostButton:disabled {
   cursor: not-allowed;
-  opacity: .5;
+  opacity: .55;
 }
 
-button:focus-visible {
-  outline: 2px solid var(--brand-action);
+button:focus-visible,
+.ghostButton:focus-visible {
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
-/* ── BUTTON VARIANTS ─────────────────────────────────────────────────────── */
-
-/* Secondary — outlined brand navy */
-.ghostButton,
-.secondaryBtn {
-  align-items: center;
-  background: transparent;
-  border: 1.5px solid var(--brand);
-  border-radius: 6px;
-  color: var(--brand);
-  cursor: pointer;
-  display: inline-flex;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  gap: 6px;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 18px;
-  text-decoration: none;
-  transition: background .15s, box-shadow .15s;
-  white-space: nowrap;
+.ghostButton {
+  background: #e7eef2;
+  color: #16313d;
 }
-.ghostButton:hover,
-.secondaryBtn:hover { background: var(--brand-light); }
-.ghostButton:disabled,
-.secondaryBtn:disabled { cursor: not-allowed; opacity: .5; }
-.ghostButton:focus-visible,
-.secondaryBtn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.ghostButton:hover { background: #d4e2e8; }
 
-/* Danger */
-.dangerButton {
-  background: var(--danger);
-  border: 0;
-  color: #fff;
-  font-weight: 600;
-  min-height: 40px;
-}
+.dangerButton { background: var(--danger); }
 .dangerButton:hover { background: #91190e; }
 
 .shell {
@@ -158,8 +89,6 @@ button:focus-visible {
 .sidebar {
   background: #111827;
   color: #f8fafc;
-  display: flex;
-  flex-direction: column;
   padding: 22px 16px;
 }
 
@@ -182,8 +111,6 @@ button:focus-visible {
   width: 42px;
 }
 
-.brand strong { color: #fff; font-size: 14px; font-weight: 700; }
-
 .brand small,
 .topbar span,
 .pageSubtitle,
@@ -197,15 +124,6 @@ small {
 
 .sidebar .brand small {
   color: #a5b4c5;
-}
-
-.sidebarGroup {
-  color: rgba(255,255,255,0.45);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .09em;
-  margin: 16px 0 6px 12px;
-  text-transform: uppercase;
 }
 
 .sidebar nav {
@@ -262,20 +180,14 @@ p {
 }
 
 h1 {
-  color: var(--brand);
-  font-size: 26px;
-  font-weight: 700;
+  font-size: 28px;
   line-height: 1.15;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 h2 {
-  color: var(--brand);
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 17px;
 }
-
-.pageTitle { color: var(--brand); font-size: 22px; font-weight: 700; margin: 0 0 2px; }
 
 .metricsGrid {
   display: grid;
@@ -393,8 +305,8 @@ th {
 }
 
 .timelineItem > span {
-  background: var(--brand-action);
-  border: 4px solid var(--brand-light);
+  background: #176b87;
+  border: 4px solid #d9edf3;
   border-radius: 50%;
   height: 18px;
   margin-top: 2px;
@@ -437,23 +349,12 @@ textarea {
   width: 100%;
 }
 
-input[type="checkbox"],
-input[type="radio"] {
-  width: auto;
-  min-height: auto;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: 0;
-  flex-shrink: 0;
-}
-
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--brand-action);
+  border-color: var(--brand);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(53,99,173,.14);
+  box-shadow: 0 0 0 3px rgba(23,107,135,.12);
 }
 
 textarea {
@@ -698,8 +599,8 @@ textarea {
 .tabBtn:hover { background: var(--bg); color: var(--text); }
 
 .tabBtn--active {
-  border-bottom-color: var(--brand-action);
-  color: var(--brand-action);
+  border-bottom-color: var(--brand);
+  color: var(--brand);
   font-weight: 700;
 }
 
@@ -711,14 +612,7 @@ textarea {
   padding: 2px 7px;
 }
 
-.tabBtn--active .tabCount { background: var(--brand-light); color: var(--brand-action); }
-
-/* underline-only tab bar (no outer border) */
-.tabBar {
-  display: flex;
-  border-bottom: 2px solid var(--border);
-  margin-bottom: 20px;
-}
+.tabBtn--active .tabCount { background: var(--brand-light); color: var(--brand); }
 
 /* ─── BADGE VARIANTS ─────────────────────────────────────────────────────── */
 
@@ -737,17 +631,12 @@ textarea {
 .badge--configurado { background: var(--ok-bg); color: var(--ok); }
 .badge--envia-cliente { background: #ede9fe; color: #5b21b6; }
 .badge--interno { background: #f4f6f8; color: #475467; }
-.badge--finalizado, .badge--aguardando-entrega { background: #f4f6f8; color: #475467; }
-.badge--entregue-apto-agendamento { background: #dbeafe; color: #1e40af; }
-.badge--convite-enviado { background: #ffedd5; color: #c2410c; }
-.badge--aguardando-cliente-agendar { background: #fef3c7; color: #92400e; }
-.badge--montagem-agendada, .badge--montagem-realizada { background: var(--ok-bg); color: var(--ok); }
 
 /* ─── METRIC CARD LINK ───────────────────────────────────────────────────── */
 
 .metric--link { cursor: pointer; position: relative; }
 .metric--link:hover { border-color: var(--brand); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
-.metricArrow { color: var(--brand-action); font-size: 18px; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
+.metricArrow { color: var(--brand); font-size: 18px; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
 
 /* ─── LOADING STATE ──────────────────────────────────────────────────────── */
 
@@ -764,7 +653,7 @@ textarea {
 .spinner {
   animation: spin .8s linear infinite;
   border: 3px solid var(--border);
-  border-top-color: var(--brand-action);
+  border-top-color: var(--brand);
   border-radius: 50%;
   height: 36px;
   width: 36px;
@@ -912,7 +801,7 @@ textarea {
   width: 100%;
 }
 
-.step.done + .step::before { background: var(--brand-action); }
+.step.done + .step::before { background: var(--brand); }
 
 .stepDot {
   align-items: center;
@@ -929,11 +818,11 @@ textarea {
   color: var(--text-muted);
 }
 
-.step.done .stepDot { background: var(--brand-action); border-color: var(--brand-action); color: #fff; }
-.step.current .stepDot { background: var(--bg-white); border-color: var(--brand-action); color: var(--brand-action); box-shadow: 0 0 0 3px rgba(53,99,173,.18); }
+.step.done .stepDot { background: var(--brand); border-color: var(--brand); color: #fff; }
+.step.current .stepDot { background: var(--bg-white); border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 3px rgba(23,107,135,.15); }
 
 .stepLabel { font-size: 11px; color: var(--text-muted); line-height: 1.2; }
-.step.current .stepLabel { color: var(--brand-action); font-weight: 700; }
+.step.current .stepLabel { color: var(--brand); font-weight: 700; }
 .step.done .stepLabel { color: var(--text); }
 
 /* ─── PUBLIC PAGE MOBILE ─────────────────────────────────────────────────── */
@@ -1002,9 +891,9 @@ textarea {
 }
 
 .scoreBtn:hover {
-  border-color: var(--brand-action);
-  background: var(--brand-light);
-  color: var(--brand-action);
+  border-color: #176b87;
+  background: #e7f4f8;
+  color: #176b87;
 }
 
 .scoreBtn.scoreDanger { border-color: #fecdca; color: #b42318; background: #fff3f2; }
@@ -1104,207 +993,5 @@ textarea {
   table {
     display: block;
     overflow-x: auto;
-  }
-}
-
-/* ─── TOPBAR ─────────────────────────────────────────────────────────────── */
-
-.topbarTitle { font-size: 15px; font-weight: 700; color: var(--brand); margin: 0; }
-.topbarSub   { font-size: 12px; color: var(--text-muted); margin: 0; }
-
-/* ─── PANEL / SECTION ────────────────────────────────────────────────────── */
-
-.panelHeader {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.panelHeader h2 { font-size: 15px; font-weight: 700; color: var(--brand); margin: 0; }
-
-/* ─── RULER STEP BRAND ───────────────────────────────────────────────────── */
-
-.rulerStep.active {
-  background: var(--brand-light);
-  border-color: var(--brand-action);
-}
-
-.rulerStep.active span {
-  background: var(--brand-action);
-  color: #fff;
-}
-
-/* ─── INLINE ACTION ROW ──────────────────────────────────────────────────── */
-
-.actionRow {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-/* ─── FILTER BAR ─────────────────────────────────────────────────────────── */
-
-.filterBar {
-  align-items: flex-end;
-  background: var(--bg-white);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 14px 16px;
-}
-
-.filterBar label { font-size: 13px; color: var(--text-secondary); gap: 4px; }
-.filterBar input,
-.filterBar select { min-height: 36px; font-size: 13px; }
-.filterBar button { min-height: 36px; font-size: 13px; padding: 0 14px; }
-
-/* ─── METRIC CARD ACTIVE ─────────────────────────────────────────────────── */
-
-.metric--active {
-  border-color: var(--brand-action);
-  background: var(--brand-light);
-}
-.metric--active strong { color: var(--brand); }
-
-/* ─── TABLE ACTIONS ──────────────────────────────────────────────────────── */
-
-.tableActions {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-}
-
-.iconBtn {
-  align-items: center;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 13px;
-  gap: 4px;
-  min-height: 32px;
-  padding: 0 10px;
-  transition: background .12s, border-color .12s, color .12s;
-}
-.iconBtn:hover { background: var(--brand-light); border-color: var(--brand-action); color: var(--brand-action); }
-
-/* ─── STATUS INDICATOR DOT ───────────────────────────────────────────────── */
-
-.statusDot {
-  border-radius: 50%;
-  display: inline-block;
-  height: 8px;
-  width: 8px;
-}
-.statusDot--ok     { background: var(--ok); }
-.statusDot--warn   { background: var(--warn); }
-.statusDot--danger { background: var(--danger); }
-
-/* ─── COLLAPSIBLE PANEL HEADER ───────────────────────────────────────────── */
-
-.collapsibleHeader {
-  align-items: center;
-  cursor: pointer;
-  display: flex;
-  font-size: 14px;
-  font-weight: 700;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 14px 16px;
-  user-select: none;
-}
-.collapsibleHeader:hover { color: var(--brand-action); }
-
-/* ── PRINT / PDF ─────────────────────────────────────────────────────────────── */
-
-@media print {
-  @page {
-    size: A4 landscape;
-    margin: 14mm 12mm 14mm 12mm;
-  }
-
-  /* Hide non-report UI */
-  .sidebar,
-  .topbar,
-  .pageAction,
-  .metricsGrid,
-  .printHide,
-  [data-no-print] {
-    display: none !important;
-  }
-
-  /* Reset shell layout — full width, no sidebar */
-  .shell {
-    display: block !important;
-  }
-
-  body, :root {
-    background: #fff !important;
-    font-size: 12px !important;
-  }
-
-  /* Page header — keep title only */
-  .pageHeader {
-    margin-bottom: 10px !important;
-    padding: 0 !important;
-  }
-
-  .pageHeader h1 {
-    font-size: 18px !important;
-  }
-
-  .pageHeader .pageSubtitle {
-    font-size: 11px !important;
-  }
-
-  /* Tables */
-  table {
-    width: 100% !important;
-    display: table !important;
-    border-collapse: collapse;
-    font-size: 11px;
-  }
-
-  th, td {
-    padding: 5px 8px !important;
-    border: 1px solid #ddd !important;
-  }
-
-  thead tr {
-    background: #f0f0f0 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  /* Preserve background colors on print */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* Avoid page breaks inside a question card */
-  [data-print-card] {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  /* Phase card bars */
-  [data-print-bar] {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  /* Phase pipeline cards — hide in print (replaced by header in panel) */
-  [data-phase-pipeline] {
-    display: none !important;
   }
 }

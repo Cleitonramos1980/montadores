@@ -2,15 +2,9 @@ import { executeOracle } from "../db/oracle";
 
 type AnyRow = Record<string, unknown>;
 
-function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]),
-  );
-}
-
 async function oq<T = AnyRow>(sql: string, binds: Record<string, unknown> = {}): Promise<T[]> {
-  const result = await executeOracle<Record<string, unknown>>(sql, binds);
-  return ((result.rows ?? []).map(normalizeRow)) as T[];
+  const result = await executeOracle<T>(sql, binds);
+  return (result.rows as T[] | undefined) ?? [];
 }
 
 function inBinds(ids: string[]): { clause: string; binds: Record<string, string> } {

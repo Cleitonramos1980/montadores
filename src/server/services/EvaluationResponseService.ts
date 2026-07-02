@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { EvaluationLinkService } from "./EvaluationLinkService";
 import { SacService } from "./SacService";
@@ -35,7 +36,7 @@ export class EvaluationResponseService {
 
   async submit(token: string, submission: EvalSubmission): Promise<EvalResponseResult> {
     const linkInfo = await this.links.getByToken(token);
-    if (!linkInfo) throw new Error("Link de avaliação inválido ou não encontrado.");
+    if (!linkInfo) throw new AppError("Link de avaliação inválido ou não encontrado.", 404, "NOT_FOUND");
     if (linkInfo.usedAt) throw new Error("Esta avaliação já foi respondida.");
     if (new Date() > linkInfo.expiresAt) throw new Error("Este link de avaliação expirou.");
 

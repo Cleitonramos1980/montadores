@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { json } from "../db/database";
 import { isOracleEnabled } from "../db/oracle";
@@ -100,7 +101,7 @@ export class ProviderService {
   async suspend(id: string, userId: string | undefined, justification: string) {
     if (!justification?.trim()) throw new Error("Justificativa obrigatória para suspensão.");
     const previous = await queryOne("SELECT * FROM MONT_PROVIDERS WHERE ID = :id", { id });
-    if (!previous) throw new Error("Montador não encontrado.");
+    if (!previous) throw new AppError("Montador não encontrado.", 404, "NOT_FOUND");
     await execDml(
       "UPDATE MONT_PROVIDERS SET STATUS = 'SUSPENSO', ACTIVE = 0, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
       { id },
@@ -116,7 +117,7 @@ export class ProviderService {
   async reactivate(id: string, userId: string | undefined, justification: string) {
     if (!justification?.trim()) throw new Error("Justificativa obrigatória para reativação.");
     const previous = await queryOne("SELECT STATUS FROM MONT_PROVIDERS WHERE ID = :id", { id });
-    if (!previous) throw new Error("Montador não encontrado.");
+    if (!previous) throw new AppError("Montador não encontrado.", 404, "NOT_FOUND");
     await execDml(
       "UPDATE MONT_PROVIDERS SET STATUS = 'APROVADO', ACTIVE = 1, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
       { id },
@@ -131,7 +132,7 @@ export class ProviderService {
 
   async getById(id: string) {
     const provider = await queryOne("SELECT * FROM MONT_PROVIDERS WHERE ID = :id", { id });
-    if (!provider) throw new Error("Montador não encontrado.");
+    if (!provider) throw new AppError("Montador não encontrado.", 404, "NOT_FOUND");
     const logs = await queryRows(
       "SELECT * FROM MONT_PROVIDER_APPROVAL_LOGS WHERE PROVIDER_ID = :id ORDER BY CREATED_AT DESC",
       { id },

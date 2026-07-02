@@ -75,13 +75,6 @@ const STATUS_LABELS: Record<string, string> = {
   CONFIGURADO: "Configurado",
   ENVIA_CLIENTE: "Envia ao cliente",
   INTERNO: "Interno",
-  FINALIZADO: "Finalizado",
-  AGUARDANDO_ENTREGA: "Aguardando entrega",
-  ENTREGUE_APTO_AGENDAMENTO: "Entregue — apto",
-  CONVITE_ENVIADO: "Convite enviado",
-  AGUARDANDO_CLIENTE_AGENDAR: "Aguard. agendar",
-  MONTAGEM_AGENDADA: "Montagem agendada",
-  MONTAGEM_REALIZADA: "Montagem realizada",
 };
 
 // ─── STATUS BADGE ────────────────────────────────────────────────────────────
@@ -127,30 +120,17 @@ export function MetricCard({
   value,
   tone = "default",
   href,
-  onClick,
-  active,
 }: {
   label: string;
   value: ReactNode;
   tone?: string;
   href?: string;
-  onClick?: () => void;
-  active?: boolean;
 }) {
-  const clickable = !!(href || onClick);
   const card = (
-    <article
-      className={`metric ${tone}${clickable ? " metric--link" : ""}`}
-      onClick={onClick}
-      style={onClick ? {
-        cursor: "pointer",
-        outline: active ? "2px solid currentColor" : undefined,
-        outlineOffset: active ? 2 : undefined,
-      } : undefined}
-    >
+    <article className={`metric ${tone}${href ? " metric--link" : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-      {clickable && <span className="metricArrow">{active ? "▲" : "▼"}</span>}
+      {href && <span className="metricArrow">→</span>}
     </article>
   );
   return href ? (

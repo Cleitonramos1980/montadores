@@ -31,11 +31,12 @@ const PHASE_LABELS: Record<string, { label: string; color: string; bg: string; b
 };
 
 const TYPE_LABELS: Record<string, string> = {
-  SCALE:         "Escala (0-10)",
-  STARS:         "Estrelas (1-5)",
-  TEXT:          "Texto livre",
-  SINGLE_CHOICE: "Escolha única",
-  YES_NO:        "Sim / Não",
+  SCALE:           "Escala (0-10)",
+  STARS:           "Estrelas (1-5)",
+  TEXT:            "Texto livre",
+  SINGLE_CHOICE:   "Escolha única",
+  MULTIPLE_CHOICE: "Múltipla escolha",
+  YES_NO:          "Sim / Não",
 };
 
 const PHASES = ["ATENDIMENTO", "ENTREGA", "MONTAGEM"] as const;
@@ -77,7 +78,7 @@ function GenLinkModal({
     }
   }
 
-  const fullUrl = result ? `${location.origin}${result.url}` : null;
+  const fullUrl = result ? result.url : null;
 
   const whatsappMsg = fullUrl
     ? encodeURIComponent(
@@ -104,8 +105,8 @@ function GenLinkModal({
                   onClick={() => setMode(m)}
                   style={{
                     flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 13, cursor: "pointer",
-                    border: `2px solid ${mode === m ? "var(--brand)" : "var(--border)"}`,
-                    background: mode === m ? "var(--brand)" : "var(--bg-secondary)",
+                    border: `2px solid ${mode === m ? "var(--brand-action)" : "var(--border)"}`,
+                    background: mode === m ? "var(--brand-action)" : "#f9fafb",
                     color: mode === m ? "#fff" : "var(--text-primary)",
                     fontWeight: mode === m ? 700 : 400,
                   }}
@@ -206,28 +207,90 @@ function QuestionEditor({
   questions: EvalQuestion[];
   onReload: () => void;
 }) {
-  const [adding, setAdding]   = useState(false);
-  const [form, setForm]       = useState({ label: "", type: "SCALE", required: true, minLabel: "", maxLabel: "" });
-  const [loading, setLoading] = useState(false);
+  const [adding, setAdding]         = useState(false);
+  const [form, setForm]             = useState({ label: "", type: "SCALE", required: true, minLabel: "", maxLabel: "", options: [] as string[], optionInput: "" });
+  const [loading, setLoading]       = useState(false);
+  const [editingId, setEditingId]   = useState<string | null>(null);
+  const [editForm, setEditForm]     = useState({ label: "", required: true, minLabel: "", maxLabel: "", options: [] as string[], optionInput: "" });
+  const [saving, setSaving]         = useState(false);
   const toast = useToast();
+
+  const isChoiceType = (t: string) => t === "SINGLE_CHOICE" || t === "MULTIPLE_CHOICE";
+
+  function addFormOption() {
+    const val = form.optionInput.trim();
+    if (!val) return;
+    if (form.options.includes(val)) { toast("Opção já existe.", "error"); return; }
+    setForm((f) => ({ ...f, options: [...f.options, val], optionInput: "" }));
+  }
+  function removeFormOption(opt: string) {
+    setForm((f) => ({ ...f, options: f.options.filter((o) => o !== opt) }));
+  }
+
+  function addEditOption() {
+    const val = editForm.optionInput.trim();
+    if (!val) return;
+    if (editForm.options.includes(val)) { toast("Opção já existe.", "error"); return; }
+    setEditForm((f) => ({ ...f, options: [...f.options, val], optionInput: "" }));
+  }
+  function removeEditOption(opt: string) {
+    setEditForm((f) => ({ ...f, options: f.options.filter((o) => o !== opt) }));
+  }
+
+  function startEdit(q: EvalQuestion) {
+    setEditingId(q.id);
+    setEditForm({ label: q.label, required: q.required, minLabel: q.minLabel ?? "", maxLabel: q.maxLabel ?? "", options: q.options ?? [], optionInput: "" });
+    setAdding(false);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(q: EvalQuestion) {
+    if (!editForm.label.trim()) { toast("O texto da pergunta não pode ficar vazio.", "error"); return; }
+    if (isChoiceType(q.type) && editForm.options.length < 2) { toast("Adicione pelo menos 2 opções.", "error"); return; }
+    setSaving(true);
+    try {
+      await api(`/eval-configs/questions/${q.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          label:    editForm.label.trim(),
+          required: editForm.required,
+          minLabel: editForm.minLabel || undefined,
+          maxLabel: editForm.maxLabel || undefined,
+          options:  isChoiceType(q.type) ? editForm.options : undefined,
+        }),
+      });
+      toast("Pergunta atualizada!");
+      setEditingId(null);
+      onReload();
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function addQuestion() {
     if (!form.label.trim()) { toast("Informe o texto da pergunta.", "error"); return; }
+    if (isChoiceType(form.type) && form.options.length < 2) { toast("Adicione pelo menos 2 opções.", "error"); return; }
     setLoading(true);
     try {
       await api(`/eval-configs/${configId}/questions`, {
         method: "POST",
         body: JSON.stringify({
-          label: form.label.trim(),
-          type: form.type,
+          label:    form.label.trim(),
+          type:     form.type,
           required: form.required,
           minLabel: form.minLabel || undefined,
           maxLabel: form.maxLabel || undefined,
+          options:  isChoiceType(form.type) ? form.options : undefined,
         }),
       });
       toast("Pergunta adicionada!");
       setAdding(false);
-      setForm({ label: "", type: "SCALE", required: true, minLabel: "", maxLabel: "" });
+      setForm({ label: "", type: "SCALE", required: true, minLabel: "", maxLabel: "", options: [], optionInput: "" });
       onReload();
     } catch (err) {
       toast((err as Error).message, "error");
@@ -251,7 +314,7 @@ function QuestionEditor({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <h4 style={{ margin: 0, fontSize: 14 }}>Perguntas ({questions.length})</h4>
         {!adding && (
-          <button className="ghostButton" style={{ fontSize: 13 }} onClick={() => setAdding(true)}>
+          <button className="ghostButton" style={{ fontSize: 13 }} onClick={() => { setAdding(true); setEditingId(null); }}>
             + Adicionar pergunta
           </button>
         )}
@@ -264,30 +327,135 @@ function QuestionEditor({
       )}
 
       {questions.map((q, i) => (
-        <div key={q.id} style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "8px 10px", background: "var(--bg-secondary)",
-          border: "1px solid var(--border)", borderRadius: 6, marginBottom: 6,
-        }}>
-          <span style={{ color: "var(--text-muted)", fontSize: 12, minWidth: 18, fontWeight: 700, marginTop: 2 }}>
-            {i + 1}.
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{q.label}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-              {TYPE_LABELS[q.type] ?? q.type}
-              {q.required && " · Obrigatório"}
-              {q.minLabel && ` · Min: "${q.minLabel}"`}
-              {q.maxLabel && ` · Max: "${q.maxLabel}"`}
+        <div key={q.id} style={{ marginBottom: 6 }}>
+          {editingId === q.id ? (
+            /* ── Formulário de edição inline ── */
+            <div style={{
+              background: "#f0f4ff", border: "1.5px solid var(--brand-action)",
+              borderRadius: 8, padding: 14,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--brand-action)", marginBottom: 10 }}>
+                Editando pergunta {i + 1}
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <label style={{ fontSize: 12 }}>
+                  Texto da pergunta <span style={{ color: "var(--danger)" }}>*</span>
+                  <input
+                    value={editForm.label}
+                    onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
+                    style={{ fontSize: 13 }}
+                    autoFocus
+                  />
+                </label>
+                {(q.type === "SCALE" || q.type === "STARS") && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Rótulo mínimo
+                      <input
+                        value={editForm.minLabel}
+                        onChange={(e) => setEditForm((f) => ({ ...f, minLabel: e.target.value }))}
+                        placeholder="Ex: Péssimo"
+                        style={{ fontSize: 13 }}
+                      />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Rótulo máximo
+                      <input
+                        value={editForm.maxLabel}
+                        onChange={(e) => setEditForm((f) => ({ ...f, maxLabel: e.target.value }))}
+                        placeholder="Ex: Excelente"
+                        style={{ fontSize: 13 }}
+                      />
+                    </label>
+                  </div>
+                )}
+                {isChoiceType(q.type) && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                      Opções ({editForm.options.length})
+                    </div>
+                    {editForm.options.map((opt, idx) => (
+                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, background: "#e8edf8", padding: "3px 10px", borderRadius: 20, flex: 1 }}>
+                          {String.fromCharCode(65 + idx)}. {opt}
+                        </span>
+                        <button type="button" className="ghostButton" style={{ fontSize: 11, color: "var(--danger)", padding: "2px 6px" }} onClick={() => removeEditOption(opt)}>✕</button>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      <input
+                        value={editForm.optionInput}
+                        onChange={(e) => setEditForm((f) => ({ ...f, optionInput: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addEditOption())}
+                        placeholder="Nova opção…"
+                        style={{ fontSize: 12, flex: 1 }}
+                      />
+                      <button type="button" className="ghostButton" style={{ fontSize: 12, padding: "4px 10px" }} onClick={addEditOption}>+ Adicionar</button>
+                    </div>
+                  </div>
+                )}
+                <label className="inlineCheck" style={{ fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={editForm.required}
+                    onChange={(e) => setEditForm((f) => ({ ...f, required: e.target.checked }))}
+                  />
+                  Obrigatória
+                </label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <ActionButton onClick={() => saveEdit(q)} loadingLabel="Salvando..." className="" disabled={saving}>
+                    Salvar alteração
+                  </ActionButton>
+                  <button className="ghostButton" onClick={cancelEdit}>Cancelar</button>
+                </div>
+              </div>
             </div>
-          </div>
-          <button
-            className="ghostButton"
-            style={{ fontSize: 12, color: "var(--danger)", padding: "2px 8px" }}
-            onClick={() => deleteQuestion(q.id)}
-          >
-            Remover
-          </button>
+          ) : (
+            /* ── Linha normal da pergunta ── */
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 10,
+              padding: "8px 10px", background: "var(--bg-secondary)",
+              border: "1px solid var(--border)", borderRadius: 6,
+            }}>
+              <span style={{ color: "var(--text-muted)", fontSize: 12, minWidth: 18, fontWeight: 700, marginTop: 2 }}>
+                {i + 1}.
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{q.label}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                  {TYPE_LABELS[q.type] ?? q.type}
+                  {q.required && " · Obrigatório"}
+                  {q.minLabel && ` · Min: "${q.minLabel}"`}
+                  {q.maxLabel && ` · Max: "${q.maxLabel}"`}
+                </div>
+                {isChoiceType(q.type) && q.options && q.options.length > 0 && (
+                  <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {q.options.map((opt, idx) => (
+                      <span key={idx} style={{ fontSize: 10, background: "#e8edf8", color: "#374151", padding: "2px 8px", borderRadius: 20 }}>
+                        {String.fromCharCode(65 + idx)}. {opt}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button
+                  className="ghostButton"
+                  style={{ fontSize: 12, padding: "2px 10px" }}
+                  onClick={() => startEdit(q)}
+                >
+                  Editar
+                </button>
+                <button
+                  className="ghostButton"
+                  style={{ fontSize: 12, color: "var(--danger)", padding: "2px 8px" }}
+                  onClick={() => deleteQuestion(q.id)}
+                >
+                  Remover
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
 
@@ -342,6 +510,31 @@ function QuestionEditor({
                     style={{ fontSize: 13 }}
                   />
                 </label>
+              </div>
+            )}
+            {isChoiceType(form.type) && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                  Opções ({form.options.length}) <span style={{ color: "var(--danger)" }}>*</span>
+                </div>
+                {form.options.map((opt, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, background: "#e8edf8", padding: "3px 10px", borderRadius: 20, flex: 1 }}>
+                      {String.fromCharCode(65 + idx)}. {opt}
+                    </span>
+                    <button type="button" className="ghostButton" style={{ fontSize: 11, color: "var(--danger)", padding: "2px 6px" }} onClick={() => removeFormOption(opt)}>✕</button>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  <input
+                    value={form.optionInput}
+                    onChange={(e) => setForm((f) => ({ ...f, optionInput: e.target.value }))}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addFormOption())}
+                    placeholder="Nova opção… (Enter para adicionar)"
+                    style={{ fontSize: 12, flex: 1 }}
+                  />
+                  <button type="button" className="ghostButton" style={{ fontSize: 12, padding: "4px 10px" }} onClick={addFormOption}>+ Adicionar</button>
+                </div>
               </div>
             )}
             <div style={{ display: "flex", gap: 8 }}>

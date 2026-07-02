@@ -72,14 +72,9 @@ export class MessageTemplateService {
   constructor(private readonly audit = new AuditService()) {}
 
   async list() {
-    let existing: Record<string, unknown>[] = [];
-    try {
-      existing = await queryRows<Record<string, unknown>>(
-        "SELECT * FROM MONT_MSG_TEMPLATES ORDER BY EVENT_TYPE",
-      );
-    } catch {
-      // Oracle unavailable — return default list with no templates
-    }
+    const existing = await queryRows<Record<string, unknown>>(
+      "SELECT * FROM MONT_MSG_TEMPLATES ORDER BY EVENT_TYPE",
+    );
     const byEvent = new Map(existing.map((t) => [String(t.event_type), t]));
 
     return eventTypes.map((eventType, index) => {

@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { features } from "../config";
 import { EventService } from "./EventService";
@@ -88,7 +89,7 @@ export class PixPaymentService {
       "SELECT * FROM MONT_PROVIDER_PAYMENTS WHERE ID = :id",
       { id: paymentId },
     );
-    if (!payment) throw new Error("Pagamento não encontrado.");
+    if (!payment) throw new AppError("Pagamento não encontrado.", 404, "NOT_FOUND");
     if (payment.status !== "LIBERADO") {
       throw new Error(`Pagamento não pode ser pago via PIX com status "${payment.status}". Deve estar LIBERADO.`);
     }

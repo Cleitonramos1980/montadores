@@ -21,6 +21,7 @@ export type OrderSnapshot = {
   numnota: string | null;
   data_faturamento: Date | null;
   data_saida_nota: Date | null;
+  data_entrega_real: Date | null;
   func_emissao_mapa: string | null;
   cod_separador: string | null;
   cod_conferente: string | null;
@@ -33,16 +34,26 @@ export type UpsertResult = {
   isNew: boolean;
   previousKey: string | null;
   changed: boolean;
+  /**
+   * True when DATA_FATURAMENTO transitions from null → set on an EXISTING order.
+   * The FATURADO_AGUARDANDO_SAIDA phase is transient (DTFAT set, DTSAIDA null) and is
+   * frequently skipped by the polling sync — the order lands directly in FINALIZADO.
+   * This flag lets the sync emit the billing milestone even when the linear phase jumped.
+   * Only fires on transition (not on isNew) to avoid back-fill spam for historical orders.
+   */
+  billingJustHappened: boolean;
 };
 
 export class OrderSnapshotService {
   async upsert(row: WinthorPedidoRow): Promise<UpsertResult> {
-    const existing = await queryOne<{ fluxo_event_key_atual: string | null }>(
-      "SELECT FLUXO_EVENT_KEY_ATUAL FROM MONT_ORDER_SNAPSHOTS WHERE NUMPED = :numped",
+    const existing = await queryOne<{ fluxo_event_key_atual: string | null; data_faturamento: Date | null }>(
+      "SELECT FLUXO_EVENT_KEY_ATUAL, DATA_FATURAMENTO FROM MONT_ORDER_SNAPSHOTS WHERE NUMPED = :numped",
       { numped: String(row.numped) },
     );
     const isNew = existing === null;
     const previousKey = existing?.fluxo_event_key_atual ?? null;
+    const previousDataFaturamento = existing?.data_faturamento ?? null;
+    const billingJustHappened = !isNew && previousDataFaturamento == null && row.data_faturamento != null;
 
     await execDml(
       `MERGE INTO MONT_ORDER_SNAPSHOTS tgt
@@ -114,6 +125,7 @@ export class OrderSnapshotService {
       isNew,
       previousKey,
       changed: isNew || previousKey !== row.fluxo_event_key,
+      billingJustHappened,
     };
   }
 

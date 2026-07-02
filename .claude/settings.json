@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "$j = $input | ConvertFrom-Json; $f = [string]$j.tool_input.file_path; if ($f -like '*app montadores*src*' -and $f -match '\\.(ts|tsx|css)$') { & 'c:\\Users\\cleit\\OneDrive\\Documentos\\app montadores\\scripts\\restart-dev.ps1' }",
+            "async": true,
+            "statusMessage": "Reiniciando servidores...",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

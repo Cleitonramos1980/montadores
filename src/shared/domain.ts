@@ -63,24 +63,25 @@ export const eventTypes = [
   "PAGAMENTO_ENVIADO_FINANCEIRO",
   "PAGAMENTO_PROGRAMADO",
   "PAGAMENTO_REALIZADO",
-  // ── Erros / sistema
-  "INTEGRACAO_WINTHOR_ERRO",
-  "MENSAGEM_ERRO_ENVIO",
-  // ── Observabilidade — elegibilidade e comissões
+  // ── Retrabalho / rework
+  "REWORK_CREATED",
+  "REWORK_CLASSIFIED",
+  "REWORK_RESOLVED",
+  // ── Pix / pagamento digital
+  "PIX_PAYMENT_REQUESTED",
+  "PIX_PAYMENT_CONFIRMED",
+  "PIX_PAYMENT_FAILED",
+  // ── Sistema / observabilidade
   "ORDER_ELIGIBILITY_CHECKED",
   "ASSEMBLY_ITEM_CREATED",
   "COMMISSION_CALCULATED",
   "PAYMENT_RECALCULATED",
-  // ── Retrabalho
-  "REWORK_CREATED",
-  "REWORK_CLASSIFIED",
-  "REWORK_RESOLVED",
-  // ── PIX
-  "PIX_PAYMENT_REQUESTED",
-  "PIX_PAYMENT_CONFIRMED",
-  "PIX_PAYMENT_FAILED",
-  // ── Offline sync
   "OFFLINE_SYNC_COMPLETED",
+  "LEMBRETE_MONTAGEM_CLIENTE",
+  "PENDENCIA_FOTOS_MONTADOR",
+  // ── Erros / sistema
+  "INTEGRACAO_WINTHOR_ERRO",
+  "MENSAGEM_ERRO_ENVIO",
 ] as const;
 
 export type EventType = (typeof eventTypes)[number];

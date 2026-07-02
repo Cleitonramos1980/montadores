@@ -1,5 +1,4 @@
 import { queryRows, queryOne } from "../db/db";
-import { features } from "../config";
 
 export type AgendaCandidatoRow = {
   order_id: string | null;
@@ -25,7 +24,6 @@ export type AgendaQueryParams = {
   daysBack?: number;
   somenteEntregues?: boolean;
   somenteComMontagem?: boolean;
-  somenteElegiveis?: boolean;
   codfilial?: string | null;
   numped?: string | null;
 };
@@ -41,7 +39,6 @@ export class WinthorAgendaRepository {
     const daysBack           = params.daysBack ?? 60;
     const somenteEntregues   = params.somenteEntregues !== false;
     const somenteComMontagem = params.somenteComMontagem !== false;
-    const somenteElegiveis   = params.somenteElegiveis !== false;
 
     const extras: string[] = [];
     const binds: Record<string, unknown> = { daysBack };
@@ -50,38 +47,15 @@ export class WinthorAgendaRepository {
     if (params.numped)    { extras.push("AND P.NUMPED    = :numped");    binds.numped    = params.numped; }
     if (somenteEntregues) { extras.push("AND CAR.DTFECHA IS NOT NULL"); }
 
-    // Filtra pedidos que têm ao menos um produto elegível para montagem.
-    // Com ENABLE_DEPARTMENT_COMMISSION_RULES=false (padrão): somente produto individual.
-    // Com flag true: produto OU departamento.
-    if (somenteElegiveis) {
-      const deptClause = features.deptCommissionRules
-        ? `OR EXISTS (
-              SELECT 1 FROM MONT_DEPT_COMMISSIONS MDC
-              WHERE TO_CHAR(MDC.CODEPTO) = TO_CHAR(PR.CODEPTO)
-                AND MDC.ACTIVE = 1
-            )`
-        : "";
-      extras.push(`AND EXISTS (
-        SELECT 1
-        FROM PCPEDI I
-        INNER JOIN PCPRODUT PR ON PR.CODPROD = I.CODPROD
-        WHERE TO_CHAR(I.NUMPED) = TO_CHAR(P.NUMPED)
-          AND NVL(I.POSICAO, 'A') != 'C'
-          AND (
-            EXISTS (
-              SELECT 1 FROM MONT_PRODUCT_COMMISSIONS MPC
-              WHERE TO_CHAR(MPC.CODPROD) = TO_CHAR(I.CODPROD)
-                AND MPC.ACTIVE = 1
-            )
-            ${deptClause}
-          )
-      )`);
-    }
-
-    // Se somenteComMontagem=true, mostra apenas onde MONT_ORDERS.HAS_ASSEMBLY=1.
-    // Se false, mostra todos os pedidos de PCPEDC (útil para diagnóstico).
+    // Dois caminhos para detectar montagem:
+    // 1) MONT_ORDERS.HAS_ASSEMBLY=1 (pedido já sincronizado)
+    // 2) EXISTS produto com VLMAODEOBRA > 0 via PCPEDI (pedido não sincronizado ainda)
     if (somenteComMontagem) {
-      extras.push("AND MO.HAS_ASSEMBLY = 1");
+      extras.push(`AND (MO.HAS_ASSEMBLY = 1 OR EXISTS (
+        SELECT 1 FROM PCPEDI I
+        JOIN PCPRODUT PR ON PR.CODPROD = I.CODPROD
+        WHERE I.NUMPED = P.NUMPED AND PR.VLMAODEOBRA > 0
+      ))`);
     }
 
     const extraSql = extras.join("\n    ");
@@ -223,47 +197,6 @@ FETCH FIRST 200 ROWS ONLY`;
          FETCH FIRST 5 ROWS ONLY`,
       );
     } catch (e) { result.entregues_sem_filtro_montagem_erro = (e as Error).message; }
-
-    // 11. Commission rules configured and eligible orders
-    try {
-      result.comissoes_produto_ativas = await queryOne(
-        "SELECT COUNT(*) AS TOTAL FROM MONT_PRODUCT_COMMISSIONS WHERE ACTIVE = 1",
-      );
-    } catch (e) { result.comissoes_produto_ativas_erro = (e as Error).message; }
-
-    try {
-      result.comissoes_depto_ativas = await queryOne(
-        "SELECT COUNT(*) AS TOTAL FROM MONT_DEPT_COMMISSIONS WHERE ACTIVE = 1",
-      );
-    } catch (e) { result.comissoes_depto_ativas_erro = (e as Error).message; }
-
-    try {
-      result.pedidos_elegiveis_60d = await queryOne(
-        `SELECT COUNT(DISTINCT P.NUMPED) AS TOTAL
-         FROM PCPEDC P
-         WHERE P.DATA >= TRUNC(SYSDATE) - 60
-           AND P.POSICAO NOT IN ('C')
-           AND EXISTS (
-             SELECT 1
-             FROM PCPEDI I
-             INNER JOIN PCPRODUT PR ON PR.CODPROD = I.CODPROD
-             WHERE TO_CHAR(I.NUMPED) = TO_CHAR(P.NUMPED)
-               AND NVL(I.POSICAO, 'A') != 'C'
-               AND (
-                 EXISTS (
-                   SELECT 1 FROM MONT_PRODUCT_COMMISSIONS MPC
-                   WHERE TO_CHAR(MPC.CODPROD) = TO_CHAR(I.CODPROD)
-                     AND MPC.ACTIVE = 1
-                 )
-                 OR EXISTS (
-                   SELECT 1 FROM MONT_DEPT_COMMISSIONS MDC
-                   WHERE TO_CHAR(MDC.CODEPTO) = TO_CHAR(PR.CODEPTO)
-                     AND MDC.ACTIVE = 1
-                 )
-               )
-           )`,
-      );
-    } catch (e) { result.pedidos_elegiveis_60d_erro = (e as Error).message; }
 
     return result;
   }

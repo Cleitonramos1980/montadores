@@ -1,5 +1,7 @@
 import { queryOne } from "../db/db";
+import { DispatchGateService } from "./DispatchGateService";
 import { MessageLogService } from "./MessageLogService";
+import { WhatsAppProviderService } from "./WhatsAppProviderService";
 import type { OrderSnapshot } from "./OrderSnapshotService";
 
 export type FluxoEventTrigger = {
@@ -16,15 +18,20 @@ export type TriggerResult = {
   logId?: string;
 };
 
-// Assembly-related event key prefixes — these require commission-eligible products
-const ASSEMBLY_EVENT_PREFIXES = ["MONTAGEM_", "ASSEMBLY_", "AGENDA_MONTAGEM"];
+function renderTemplate(body: string, vars: Record<string, string | null | undefined>): string {
+  return body.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? `{{${key}}}`);
+}
 
 export class MessageTriggerService {
-  constructor(private readonly logs = new MessageLogService()) {}
+  constructor(
+    private readonly logs = new MessageLogService(),
+    private readonly wp   = new WhatsAppProviderService(),
+    private readonly gate = new DispatchGateService(),
+  ) {}
 
   async process(event: FluxoEventTrigger, snapshot: OrderSnapshot): Promise<TriggerResult> {
     // 1. Load event config
-    const config = await queryOne<{
+    const eventConfig = await queryOne<{
       ativo_mensagem: number;
       modo_envio: string;
       telefones_teste: string | null;
@@ -33,142 +40,208 @@ export class MessageTriggerService {
       { key: event.eventKey },
     );
 
-    if (!config || Number(config.ativo_mensagem) === 0) {
+    if (!eventConfig || Number(eventConfig.ativo_mensagem) === 0) {
       const { id } = await this.logs.log({
         numped:    event.numped,
         codcli:    event.codcli,
         eventKey:  event.eventKey,
         status:    "IGNORADO_EVENTO_INATIVO",
-        modoEnvio: config?.modo_envio ?? "DRY_RUN",
+        modoEnvio: eventConfig?.modo_envio ?? "DRY_RUN",
       });
       return { status: "IGNORADO_EVENTO_INATIVO", reason: "Evento inativo", logId: id };
     }
 
-    // 2. For assembly events — skip if no commission-eligible products are configured
-    const isAssemblyEvent = ASSEMBLY_EVENT_PREFIXES.some((p) =>
-      event.eventKey.toUpperCase().startsWith(p),
-    );
-    if (isAssemblyEvent) {
-      const itemCheck = await queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) AS CNT
-         FROM MONT_ASSEMBLY_JOB_ITEMS ji
-         JOIN MONT_ASSEMBLY_JOBS j ON j.ID = ji.ASSEMBLY_JOB_ID
-         JOIN MONT_ORDERS o ON o.ID = j.ORDER_ID
-         WHERE TO_CHAR(o.NUMPED) = TO_CHAR(:numped)`,
-        { numped: event.numped },
-      ).catch(() => null);
-      if (!itemCheck || Number(itemCheck.cnt) === 0) {
-        const { id } = await this.logs.log({
-          numped:   event.numped,
-          codcli:   event.codcli,
-          eventKey: event.eventKey,
-          status:   "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM",
-          modoEnvio: config?.modo_envio ?? "DRY_RUN",
-        });
-        return { status: "IGNORADO_SEM_PRODUTO_COMISSAO_MONTAGEM", reason: "Pedido sem itens com comissão de montagem configurada", logId: id };
-      }
-    }
-
-    // 3. Global mode (overrides per-event mode if set to DRY_RUN)
+    // 2. Global mode (DRY_RUN wins if set globally)
     const globalModeRow = await queryOne<{ config_value: string }>(
       "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'MESSAGE_TRIGGER_MODE'",
     );
-    const globalMode = globalModeRow?.config_value ?? "DRY_RUN";
-    const effectiveMode = globalMode === "DRY_RUN" ? "DRY_RUN" : config.modo_envio;
+    const globalMode    = globalModeRow?.config_value ?? "DRY_RUN";
+    const effectiveMode = globalMode === "DRY_RUN" ? "DRY_RUN" : eventConfig.modo_envio;
 
+    // 3. DRY_RUN: short-circuit with deduplication — never calls WhatsApp
     if (effectiveMode === "DRY_RUN") {
+      const idempotencyKey = `fluxo:${event.numped}:${event.eventKey}`;
+      const alreadySent = await this.logs.checkIdempotency(idempotencyKey, "DRY_RUN");
+      if (alreadySent) {
+        return { status: "IGNORADO_DUPLICIDADE", reason: "Já simulado (idempotência DRY_RUN)" };
+      }
       const { id } = await this.logs.log({
-        numped:    event.numped,
-        codcli:    event.codcli,
-        eventKey:  event.eventKey,
-        status:    "SIMULADO_DRY_RUN",
-        modoEnvio: "DRY_RUN",
-        payload:   { snapshot: { numped: snapshot.numped, nome: snapshot.nome_cliente } },
+        numped:         event.numped,
+        codcli:         event.codcli,
+        eventKey:       event.eventKey,
+        status:         "SIMULADO_DRY_RUN",
+        modoEnvio:      "DRY_RUN",
+        idempotencyKey,
+        payload:        { snapshot: { numped: snapshot.numped, nome: snapshot.nome_cliente } },
       });
       return { status: "SIMULADO_DRY_RUN", logId: id };
     }
 
-    // 3. Resolve phone number
-    const customerPhone = await this._resolvePhone(event.codcli, snapshot, config, effectiveMode);
-    if (!customerPhone) {
+    // 4. Resolve destination phone
+    // HOMOLOGACAO: always redirect to configured test phones — NEVER to real customer
+    // PRODUCAO: use real customer phone (with opt-out and fallback checks)
+    let destPhone: string;
+
+    if (effectiveMode === "HOMOLOGACAO") {
+      const testNumbers = (eventConfig.telefones_teste ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      if (!testNumbers[0]) {
+        const { id } = await this.logs.log({
+          numped:    event.numped,
+          codcli:    event.codcli,
+          eventKey:  event.eventKey,
+          status:    "IGNORADO_SEM_TELEFONE",
+          modoEnvio: effectiveMode,
+          payload:   { aviso: "HOMOLOGACAO ativo mas TELEFONES_TESTE não configurado no evento." },
+        });
+        return { status: "IGNORADO_SEM_TELEFONE", reason: "HOMOLOGACAO sem piloto configurado", logId: id };
+      }
+      destPhone = testNumbers[0];
+    } else {
+      // PRODUCAO: resolve real customer phone
+      const customer = await queryOne<{ phone: string | null; opt_out_whatsapp: number }>(
+        "SELECT PHONE, OPT_OUT_WHATSAPP FROM MONT_CUSTOMERS WHERE CODCLI = :codcli",
+        { codcli: event.codcli },
+      );
+
+      if (Number(customer?.opt_out_whatsapp ?? 0) === 1) {
+        const { id } = await this.logs.log({
+          numped:    event.numped,
+          codcli:    event.codcli,
+          eventKey:  event.eventKey,
+          status:    "IGNORADO_OPT_OUT",
+          modoEnvio: effectiveMode,
+        });
+        return { status: "IGNORADO_OPT_OUT", reason: "Cliente optou por não receber mensagens", logId: id };
+      }
+
+      let phone: string | null = customer?.phone ?? null;
+      if (!phone) {
+        const wt = await queryOne<{ telcelent: string | null; telent: string | null }>(
+          "SELECT TELCELENT, TELENT FROM PCCLIENT WHERE CODCLI = :codcli",
+          { codcli: event.codcli },
+        );
+        phone = wt?.telcelent || wt?.telent || null;
+      }
+
+      if (!phone) {
+        const { id } = await this.logs.log({
+          numped:    event.numped,
+          codcli:    event.codcli,
+          eventKey:  event.eventKey,
+          status:    "IGNORADO_SEM_TELEFONE",
+          modoEnvio: effectiveMode,
+        });
+        return { status: "IGNORADO_SEM_TELEFONE", reason: "Telefone não encontrado", logId: id };
+      }
+      destPhone = phone;
+    }
+
+    // 5. Load template (must include resend config columns)
+    const template = await queryOne<{
+      id: string;
+      body: string;
+      active: number;
+      send_hour_start: number | null;
+      send_hour_end:   number | null;
+      resend_allowed:  number | null;
+      max_resends:     number | null;
+      resend_after_h:  number | null;
+    }>(
+      `SELECT ID, BODY, ACTIVE, SEND_HOUR_START, SEND_HOUR_END,
+              RESEND_ALLOWED, MAX_RESENDS, RESEND_AFTER_H
+       FROM MONT_MSG_TEMPLATES WHERE UPPER(EVENT_TYPE) = UPPER(:et)`,
+      { et: event.eventKey },
+    );
+
+    if (!template || Number(template.active) === 0) {
       const { id } = await this.logs.log({
         numped:    event.numped,
         codcli:    event.codcli,
         eventKey:  event.eventKey,
-        status:    "IGNORADO_SEM_TELEFONE",
+        status:    "IGNORADO_TEMPLATE_INATIVO",
         modoEnvio: effectiveMode,
-      });
-      return { status: "IGNORADO_SEM_TELEFONE", reason: "Telefone não encontrado", logId: id };
-    }
-
-    // 4. Load template from MONT_MSG_TEMPLATES by event type (matching EVENT_TYPE = FLUXO_EVENT_KEY)
-    const template = await queryOne<{ id: string; body: string; active: number }>(
-      `SELECT ID, BODY, ACTIVE FROM MONT_MSG_TEMPLATES WHERE UPPER(EVENT_TYPE) = UPPER(:et)`,
-      { et: event.eventKey },
-    );
-    if (!template || Number(template.active) === 0) {
-      const { id } = await this.logs.log({
-        numped:     event.numped,
-        codcli:     event.codcli,
-        eventKey:   event.eventKey,
-        status:     "IGNORADO_TEMPLATE_INATIVO",
-        modoEnvio:  effectiveMode,
       });
       return { status: "IGNORADO_TEMPLATE_INATIVO", reason: "Template inativo ou não encontrado", logId: id };
     }
 
-    // 5. Idempotency check
-    const idempotencyKey = `fluxo:${event.numped}:${event.eventKey}:${event.id}`;
-    const alreadySent = await this.logs.checkIdempotency(idempotencyKey);
-    if (alreadySent) {
-      return { status: "IGNORADO_DUPLICIDADE", reason: "Já enviado (idempotência)" };
+    // 6. Dispatch gate (hour window + weekends + holidays)
+    const gateResult = this.gate.check({
+      sendHourStart: template.send_hour_start ?? 8,
+      sendHourEnd:   template.send_hour_end   ?? 21,
+    });
+    if (!gateResult.allowed) {
+      const { id } = await this.logs.log({
+        numped:    event.numped,
+        codcli:    event.codcli,
+        eventKey:  event.eventKey,
+        status:    "IGNORADO_REGRA_NAO_VALIDADA",
+        modoEnvio: effectiveMode,
+        payload:   { reason: gateResult.reason },
+      });
+      return { status: "IGNORADO_REGRA_NAO_VALIDADA", reason: gateResult.reason, logId: id };
     }
 
-    // 6. Log as ENVIADO (actual send integration is future work)
+    // 7. Idempotency + optional resend logic
+    const baseKey     = `fluxo:${event.numped}:${event.eventKey}`;
+    const alreadySent = await this.logs.checkIdempotency(baseKey);
+    let idempotencyKey = baseKey;
+
+    if (alreadySent) {
+      const resendAllowed = Number(template.resend_allowed ?? 0);
+      if (!resendAllowed) {
+        return { status: "IGNORADO_DUPLICIDADE", reason: "Já enviado — reenvio não permitido para este template" };
+      }
+
+      const maxResends   = Number(template.max_resends  ?? 1);
+      const resendAfterH = Number(template.resend_after_h ?? 24);
+      const { resendCount, lastSentAt } = await this.logs.getSendHistory(baseKey);
+
+      if (resendCount >= maxResends) {
+        return { status: "IGNORADO_DUPLICIDADE", reason: `Limite de ${maxResends} reenvio(s) atingido` };
+      }
+      if (lastSentAt) {
+        const elapsedH = (Date.now() - new Date(lastSentAt).getTime()) / 3_600_000;
+        if (elapsedH < resendAfterH) {
+          const remaining = Math.ceil(resendAfterH - elapsedH);
+          return {
+            status: "IGNORADO_DUPLICIDADE",
+            reason:  `Intervalo de reenvio não atingido — aguarde ${resendAfterH}h (${remaining}h restantes)`,
+          };
+        }
+      }
+      idempotencyKey = `${baseKey}:r${resendCount + 1}`;
+    }
+
+    // 8. Render template and send
+    const renderedText = renderTemplate(template.body, {
+      nome:    snapshot.nome_cliente,
+      numped:  snapshot.numped,
+      numnota: snapshot.numnota ?? undefined,
+      codcli:  snapshot.codcli,
+    });
+
+    const sendResult = await this.wp.send({ to: destPhone, text: renderedText, modo: effectiveMode });
+
+    const logStatus = sendResult.status === "ENVIADO" ? "ENVIADO" : "ERRO";
     const { id: logId, duplicate } = await this.logs.log({
       numped:         event.numped,
       codcli:         event.codcli,
       eventKey:       event.eventKey,
       templateId:     template.id,
-      destino:        customerPhone,
-      status:         "ENVIADO",
+      destino:        destPhone,
+      status:         logStatus,
       idempotencyKey,
       modoEnvio:      effectiveMode,
+      erro:           sendResult.error ?? null,
       payload:        {
         nome:     snapshot.nome_cliente,
         numped:   event.numped,
-        numnota:  snapshot.numnota,
-        template: template.body.slice(0, 200),
+        provider: sendResult.provider,
       },
     });
 
     if (duplicate) return { status: "IGNORADO_DUPLICIDADE", logId };
-    return { status: "ENVIADO", logId };
-  }
-
-  private async _resolvePhone(
-    codcli: string,
-    snapshot: OrderSnapshot,
-    config: { telefones_teste: string | null },
-    mode: string,
-  ): Promise<string | null> {
-    if (mode === "HOMOLOGACAO") {
-      const testNumbers = (config.telefones_teste ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      return testNumbers[0] ?? null;
-    }
-
-    // Try MONT_CUSTOMERS first
-    const customer = await queryOne<{ phone: string | null }>(
-      "SELECT PHONE FROM MONT_CUSTOMERS WHERE CODCLI = :codcli",
-      { codcli },
-    );
-    if (customer?.phone) return customer.phone;
-
-    // Fall back to PCCLIENT.TELCELENT or TELENT
-    const wt = await queryOne<{ telcelent: string | null; telent: string | null }>(
-      "SELECT TELCELENT, TELENT FROM PCCLIENT WHERE CODCLI = :codcli",
-      { codcli },
-    );
-    return wt?.telcelent || wt?.telent || null;
+    return { status: logStatus, logId };
   }
 }

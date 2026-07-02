@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { isOracleEnabled } from "../db/oracle";
 import { WinthorPedidoItemRepository } from "../oracle/WinthorPedidoItemRepository";
@@ -60,7 +61,7 @@ export class CommissionCalculationService {
        WHERE p.ID = :id`,
       { id: paymentId },
     );
-    if (!payment) throw new Error("Pagamento não encontrado.");
+    if (!payment) throw new AppError("Pagamento não encontrado.", 404, "NOT_FOUND");
     if (payment.status === "PAGO") throw new Error("Pagamento já realizado. Recálculo não permitido automaticamente.");
 
     // Load active commission rules into a map by CODPROD
