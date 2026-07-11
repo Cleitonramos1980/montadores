@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { logger } from "../logger";
 import type { EventType } from "../../shared/domain";
 import { execDml, queryOne } from "../db/db";
 import { json } from "../db/database";
@@ -182,7 +183,7 @@ export class EventService {
         codcli:  input.codcli ?? "",
       });
     } catch (err) {
-      console.error(`[EventService] Gatilho de mensagem falhou para ${input.type}/${input.numped}:`, (err as Error).message);
+      logger.error({ err: (err as Error).message, type: input.type, numped: input.numped }, "[event] gatilho de mensagem falhou");
     }
 
     return id;

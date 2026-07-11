@@ -5,6 +5,8 @@ import { authMiddleware, requireRole } from "../middleware/auth";
 import { PedidoFluxoSyncService } from "../services/PedidoFluxoSyncService";
 import { DashboardPedidoFluxoService } from "../services/DashboardPedidoFluxoService";
 import { MessageLogService } from "../services/MessageLogService";
+import { MessageTriggerService } from "../services/MessageTriggerService";
+import { OrderSnapshotService } from "../services/OrderSnapshotService";
 import { queryOne, queryRows } from "../db/db";
 
 export const fluxo = Router();
@@ -23,6 +25,8 @@ function asyncRoute(fn: (req: Request, res: Response) => Promise<unknown>) {
 const sync  = new PedidoFluxoSyncService();
 const dash  = new DashboardPedidoFluxoService();
 const msgLogs = new MessageLogService();
+const trigger = new MessageTriggerService();
+const snapshots = new OrderSnapshotService();
 
 // ── Sync config ───────────────────────────────────────────────────────────────
 
@@ -152,16 +156,16 @@ fluxo.post("/fluxo/message-logs/:id/reenviar", fluxoAdmin, asyncRoute(async (req
   if (!existing) { res.status(404).json({ error: "Log não encontrado" }); return; }
   const entry = existing as any;
 
-  const result = await msgLogs.log({
-    numped:   entry.numped,
-    codcli:   entry.codcli,
-    eventKey: entry.event_key,
-    status:   "ENVIADO",
-    modoEnvio: entry.modo_envio,
-    destino:  entry.destino,
-    payload:  { reenvio: true, originalId: id },
-  });
+  // Reenvia DE VERDADE pelo MessageTriggerService — respeita DRY_RUN/HOMOLOGACAO,
+  // piloto, janela de horário, opt-out e política de reenvio do template. Antes apenas
+  // gravava um log 'ENVIADO' sem nunca chamar o provedor (feature falsamente "ok").
+  const snapshot = await snapshots.findByNumped(String(entry.numped));
+  if (!snapshot) { res.status(404).json({ error: "Snapshot do pedido não encontrado para reenvio." }); return; }
 
+  const result = await trigger.process(
+    { id, numped: String(entry.numped), codcli: String(entry.codcli ?? ""), eventKey: entry.event_key, fluxoEventKeyNovo: entry.event_key },
+    snapshot,
+  );
   res.status(201).json(result);
 }));
 

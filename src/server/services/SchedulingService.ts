@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { AppError } from "../errors";
-import { execDml, queryOne, queryRows } from "../db/db";
+import { execDml, queryOne, queryRows, withTransaction } from "../db/db";
 import { EventService } from "./EventService";
 
 export class SchedulingService {
@@ -41,19 +41,16 @@ export class SchedulingService {
     );
     if (!order) throw new AppError("Pedido não encontrado.", 404, "NOT_FOUND");
 
-    const scheduleId = uuid();
-    await execDml(
-      `INSERT INTO MONT_ASSEMBLY_SCHEDULES (ID, ORDER_ID, PROVIDER_ID, SCHEDULED_DATE, SCHEDULED_PERIOD)
-       VALUES (:id, :orderId, :providerId, :scheduledDate, :scheduledPeriod)`,
-      { id: scheduleId, orderId, providerId, scheduledDate: date, scheduledPeriod: period },
+    // Idempotência por pedido: um pedido não pode ter dois agendamentos/jobs ativos
+    // (senão gera 2 montadores + 2 pagamentos para a mesma montagem).
+    const existing = await queryOne<{ value: number }>(
+      `SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_JOBS
+       WHERE ORDER_ID = :orderId AND STATUS IN ('AGENDADA','EM_EXECUCAO','FINALIZADA')`,
+      { orderId },
     );
-
-    const jobId = uuid();
-    await execDml(
-      `INSERT INTO MONT_ASSEMBLY_JOBS (ID, ORDER_ID, SCHEDULE_ID, PROVIDER_ID, STATUS)
-       VALUES (:id, :orderId, :scheduleId, :providerId, 'AGENDADA')`,
-      { id: jobId, orderId, scheduleId, providerId },
-    );
+    if (Number(existing?.value ?? 0) > 0) {
+      throw new AppError("Este pedido já possui uma montagem agendada.", 409, "CONFLICT");
+    }
 
     // Calculate assembly cost from VLMAODEOBRA stored in ASSEMBLY_COST column
     const costRow = await queryOne<{ total: number }>(
@@ -64,16 +61,30 @@ export class SchedulingService {
     );
     const amount = Number(costRow?.total ?? 0) > 0 ? Number(costRow!.total) : 120;
 
-    await execDml(
-      `INSERT INTO MONT_PROVIDER_PAYMENTS (ID, PROVIDER_ID, ASSEMBLY_JOB_ID, AMOUNT, STATUS)
-       VALUES (:id, :providerId, :jobId, :amount, 'AGUARDANDO_FINALIZACAO')`,
-      { id: uuid(), providerId, jobId, amount },
-    );
-
-    await execDml(
-      "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_AGENDADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: orderId },
-    );
+    const scheduleId = uuid();
+    const jobId = uuid();
+    // Atômico: schedule + job + pagamento + status do pedido são tudo-ou-nada.
+    await withTransaction(async (tx) => {
+      await tx.exec(
+        `INSERT INTO MONT_ASSEMBLY_SCHEDULES (ID, ORDER_ID, PROVIDER_ID, SCHEDULED_DATE, SCHEDULED_PERIOD)
+         VALUES (:id, :orderId, :providerId, :scheduledDate, :scheduledPeriod)`,
+        { id: scheduleId, orderId, providerId, scheduledDate: date, scheduledPeriod: period },
+      );
+      await tx.exec(
+        `INSERT INTO MONT_ASSEMBLY_JOBS (ID, ORDER_ID, SCHEDULE_ID, PROVIDER_ID, STATUS)
+         VALUES (:id, :orderId, :scheduleId, :providerId, 'AGENDADA')`,
+        { id: jobId, orderId, scheduleId, providerId },
+      );
+      await tx.exec(
+        `INSERT INTO MONT_PROVIDER_PAYMENTS (ID, PROVIDER_ID, ASSEMBLY_JOB_ID, AMOUNT, STATUS)
+         VALUES (:id, :providerId, :jobId, :amount, 'AGUARDANDO_FINALIZACAO')`,
+        { id: uuid(), providerId, jobId, amount },
+      );
+      await tx.exec(
+        "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_AGENDADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+        { id: orderId },
+      );
+    });
 
     await this.events.emit({
       type: "MONTAGEM_AGENDADA",

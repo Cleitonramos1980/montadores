@@ -49,16 +49,19 @@ export const features = config.features;
 // Security checks at startup — fatal in production
 const { isProduction } = config;
 
+// Considera fraco: valores-padrão conhecidos OU segredo curto demais para HMAC-SHA256.
+// (Antes só comparava 2 strings exatas — um segredo de 9 chars como "change-me" passava.)
 const weakJwt =
   config.jwtSecret === DEV_JWT_SECRET ||
-  config.jwtSecret === "change-me-in-production-use-at-least-32-chars";
+  config.jwtSecret === "change-me-in-production-use-at-least-32-chars" ||
+  config.jwtSecret.length < 32;
 
 if (weakJwt) {
   if (isProduction) {
-    console.error("[SEGURANÇA FATAL] JWT_SECRET com valor padrão em produção. Servidor abortado.");
+    console.error("[SEGURANÇA FATAL] JWT_SECRET ausente, padrão ou com menos de 32 caracteres em produção. Servidor abortado.");
     process.exit(1);
   }
-  console.warn("[SEGURANÇA] JWT_SECRET está com valor padrão de desenvolvimento. Altere antes de usar em produção!");
+  console.warn("[SEGURANÇA] JWT_SECRET fraco (padrão ou < 32 caracteres). Gere um segredo forte antes de produção!");
 }
 if (!config.corsOrigins) {
   if (isProduction) {

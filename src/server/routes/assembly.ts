@@ -3,6 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireRole } from "../middleware/auth";
 import { AppError, ForbiddenError, NotFoundError } from "../errors";
+import { httpUrl } from "../utils/validators";
 import { AssemblyService } from "../services/AssemblyService";
 import { SchedulingService } from "../services/SchedulingService";
 import { MontadorHistoricoService } from "../services/MontadorHistoricoService";
@@ -77,7 +78,7 @@ assemblyRouter.post("/assembly/:jobId/photos", assemblyOpRoles, asyncRoute(async
     throw new Error(`Limite de ${MAX_PHOTOS_PER_JOB} fotos por montagem atingido.`);
   }
 
-  const body = z.object({ fileUrl: z.string().min(3), photoType: z.string().optional() }).parse(req.body);
+  const body = z.object({ fileUrl: httpUrl, photoType: z.string().optional() }).parse(req.body);
   res.status(201).json(await assembly.addPhoto(jobId, body.fileUrl, body.photoType));
 }));
 
@@ -136,7 +137,7 @@ assemblyRouter.get("/assembly/jobs", asyncRoute(async (req: Request, res: Respon
 
 // Provider invoice upload
 assemblyRouter.post("/assembly/:jobId/invoice", asyncRoute(async (req, res) => {
-  const body  = z.object({ invoiceUrl: z.string().url().min(5) }).parse(req.body);
+  const body  = z.object({ invoiceUrl: httpUrl }).parse(req.body);
   const jobId = param(req.params.jobId);
   const job   = await queryOne<{ id: string; provider_id: string }>(
     "SELECT ID, PROVIDER_ID FROM MONT_ASSEMBLY_JOBS WHERE ID = :jobId AND STATUS = 'FINALIZADA'",
@@ -224,10 +225,12 @@ assemblyRouter.get("/assembly/provider/history", asyncRoute(async (req, res) => 
 // Provider dashboard summary (App Montador)
 assemblyRouter.get("/assembly/provider/dashboard", asyncRoute(async (req, res) => {
   const userId   = req.user!.sub;
+  // Sem .catch(()=>null): um erro de banco não deve virar dashboard zerado (o montador
+  // acharia que não tem saldo/jobs). queryOne já retorna null se não houver provider.
   const provider = await queryOne<{ id: string }>(
     "SELECT p.ID FROM MONT_PROVIDERS p JOIN MONT_USERS u ON u.EMAIL = p.EMAIL WHERE u.ID = :userId",
     { userId },
-  ).catch(() => null);
+  );
   if (!provider) { res.json({ providerId: null, weekJobs: 0, pendingBalance: 0, expiringDocs: 0 }); return; }
 
   const providerId   = provider.id;

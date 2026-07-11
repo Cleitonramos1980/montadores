@@ -1,5 +1,9 @@
-// Fila offline — permite ações e fotos quando sem internet.
-// Comunica com o service worker via postMessage.
+// Fila offline — permite ações e fotos quando sem internet, via service worker.
+//
+// ATENÇÃO: o service worker (public/sw.js) NÃO é registrado hoje e não há chamadores
+// destas funções — a fila offline está INATIVA. Para ativá-la seria preciso registrar
+// o SW no boot do client e persistir a fila em IndexedDB. Até lá, o fallback abaixo faz
+// envio direto e PROPAGA erros (nunca engole em silêncio), para o chamador tratar/retentar.
 
 export type QueueStatus = {
   pendingActions: number;
@@ -10,20 +14,23 @@ function swReady(): ServiceWorker | null {
   return navigator.serviceWorker?.controller ?? null;
 }
 
-export function queueAction(opts: {
+/** Enfileira (via SW) ou envia direto. Retorna true se enviado/enfileirado; lança em falha de rede. */
+export async function queueAction(opts: {
   url: string;
   method: string;
   headers?: Record<string, string>;
   body?: string;
   label?: string;
-}): void {
+}): Promise<boolean> {
   const sw = swReady();
   if (sw) {
     sw.postMessage({ type: "QUEUE_ACTION", payload: opts });
-  } else {
-    // Sem SW: tenta imediatamente e falha silenciosamente
-    fetch(opts.url, { method: opts.method, headers: opts.headers, body: opts.body ?? undefined }).catch(() => {});
+    return true;
   }
+  // Sem SW: envia direto. Erro PROPAGA (não silencioso) para o chamador tratar.
+  const res = await fetch(opts.url, { method: opts.method, headers: opts.headers, body: opts.body ?? undefined });
+  if (!res.ok) throw new Error(`Falha ao enviar ação (${res.status})`);
+  return true;
 }
 
 export function queuePhoto(opts: {
@@ -32,11 +39,14 @@ export function queuePhoto(opts: {
   mimeType: string;
   fileName: string;
   authHeader?: string;
-}): void {
+}): boolean {
   const sw = swReady();
   if (sw) {
     sw.postMessage({ type: "QUEUE_PHOTO", payload: opts });
+    return true;
   }
+  // Sem SW não há como persistir a foto offline — sinaliza ao chamador (não engole).
+  return false;
 }
 
 export function getQueueStatus(): Promise<QueueStatus> {

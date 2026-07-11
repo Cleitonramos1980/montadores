@@ -98,9 +98,20 @@ SELECT
 FROM PCPEDC P
 INNER JOIN PCCLIENT C ON C.CODCLI = P.CODCLI
 LEFT JOIN NF_BASE NF ON (NF.NUMPED = P.NUMPED AND NF.CONDVENDA = P.CONDVENDA)
-WHERE P.DATA >= :dataInicioPedido
-  AND P.DATA < :dataFimPedido + 1
-  AND P.CONDVENDA = :condvenda
+WHERE P.CONDVENDA = :condvenda
+  -- Inclui o pedido se a digitação OU qualquer transição de fase (mapa, separação,
+  -- conferência, faturamento, saída) caiu na janela. Antes filtrava só por P.DATA
+  -- (digitação): pedido que evoluía após N dias nunca mais era sincronizado, perdendo
+  -- eventos/mensagens. O sync é idempotente (diff de snapshot), então incluir mais
+  -- pedidos não gera eventos duplicados.
+  AND (
+       (P.DATA              >= :dataInicioPedido AND P.DATA              < :dataFimPedido + 1)
+    OR (P.DTEMISSAOMAPA     >= :dataInicioPedido AND P.DTEMISSAOMAPA     < :dataFimPedido + 1)
+    OR (P.DTINICIALCHECKOUT >= :dataInicioPedido AND P.DTINICIALCHECKOUT < :dataFimPedido + 1)
+    OR (P.DTFINALCHECKOUT   >= :dataInicioPedido AND P.DTFINALCHECKOUT   < :dataFimPedido + 1)
+    OR (NF.DTFAT            >= :dataInicioPedido AND NF.DTFAT            < :dataFimPedido + 1)
+    OR (NF.DTSAIDA          >= :dataInicioPedido AND NF.DTSAIDA          < :dataFimPedido + 1)
+  )
   ${extraSql}
 ORDER BY P.DATA DESC, P.NUMPED DESC`;
 

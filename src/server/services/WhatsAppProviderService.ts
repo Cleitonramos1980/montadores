@@ -1,3 +1,5 @@
+import { logger } from "../logger";
+
 export type WhatsAppSendResult = {
   status: "SIMULADO" | "ENVIADO" | "ERRO";
   provider?: "uazapiGO" | "Meta";
@@ -38,12 +40,13 @@ async function fetchWithRetry(
       const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
       if (resp.ok) return resp;
       if (!TRANSIENT_HTTP.has(resp.status)) {
-        console.warn(`[WhatsApp] ${label} HTTP ${resp.status}`, await resp.text().catch(() => ""));
+        // Não loga o corpo bruto da resposta (pode conter telefone/PII do gateway).
+        logger.warn({ provider: label, status: resp.status }, "[whatsapp] HTTP não-transitório");
         return null;
       }
-      console.warn(`[WhatsApp] ${label} HTTP ${resp.status} — retry ${attempt + 1}`);
+      logger.warn({ provider: label, status: resp.status, attempt: attempt + 1 }, "[whatsapp] HTTP transitório — retry");
     } catch (err) {
-      console.error(`[WhatsApp] ${label} erro tentativa ${attempt + 1}:`, (err as Error).message);
+      logger.error({ provider: label, attempt: attempt + 1, err: (err as Error).message }, "[whatsapp] erro na tentativa");
     }
     if (attempt < RETRY_DELAYS_MS.length) await sleep(RETRY_DELAYS_MS[attempt]);
   }
@@ -80,8 +83,14 @@ export class WhatsAppProviderService {
         "uazapiGO",
       );
       if (resp) {
-        const data = await resp.json() as { messageId?: string };
-        return { status: "ENVIADO", provider: "uazapiGO", messageId: data.messageId };
+        const data = await resp.json().catch(() => ({})) as { messageId?: string; id?: string; error?: unknown };
+        const msgId = data.messageId ?? data.id;
+        // 2xx não é garantia de entrega: só confirma ENVIADO se o corpo trouxer id da
+        // mensagem e não trouxer erro. Senão trata como ERRO (diagnóstico no error).
+        if (msgId && !data.error) {
+          return { status: "ENVIADO", provider: "uazapiGO", messageId: String(msgId) };
+        }
+        return { status: "ERRO", provider: "uazapiGO", error: `Resposta sem confirmação de envio: ${JSON.stringify(data).slice(0, 200)}` };
       }
     }
 
@@ -105,8 +114,12 @@ export class WhatsAppProviderService {
         "Meta",
       );
       if (resp) {
-        const data = await resp.json() as { messages?: Array<{ id: string }> };
-        return { status: "ENVIADO", provider: "Meta", messageId: data.messages?.[0]?.id };
+        const data = await resp.json().catch(() => ({})) as { messages?: Array<{ id: string }>; error?: unknown };
+        const msgId = data.messages?.[0]?.id;
+        if (msgId && !data.error) {
+          return { status: "ENVIADO", provider: "Meta", messageId: msgId };
+        }
+        return { status: "ERRO", provider: "Meta", error: `Resposta sem confirmação de envio: ${JSON.stringify(data).slice(0, 200)}` };
       }
     }
 

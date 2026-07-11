@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { logger } from "../logger";
 import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 
@@ -243,7 +244,7 @@ export class EvaluationConfigService {
 
   private _mapQuestion(row: any): EvalQuestion {
     let options: string[] | null = null;
-    try { options = row.options_json ? JSON.parse(row.options_json as string) : null; } catch { console.warn(`[EvaluationConfigService] options_json inválido para questão ${row.id as string}`); }
+    try { options = row.options_json ? JSON.parse(row.options_json as string) : null; } catch { logger.warn({ questionId: row.id as string }, "[eval-config] options_json inválido"); }
     return {
       id: row.id as string,
       configId: row.config_id as string,

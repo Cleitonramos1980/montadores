@@ -113,6 +113,18 @@ export function createApp(): express.Express {
         legacyHeaders: false,
       }),
     );
+    // Rotas públicas (sem auth) — protege contra abuso/enumeração de token e
+    // escrita anônima (cadastro de montador, respostas de avaliação, agendamento).
+    app.use(
+      "/api/public",
+      rateLimit({
+        windowMs: 15 * 60 * 1000,
+        max: 60,
+        message: { error: "Muitas requisições. Tente novamente em alguns minutos." },
+        standardHeaders: true,
+        legacyHeaders: false,
+      }),
+    );
   }
 
   // ── Static uploads ─────────────────────────────────────────────────────────

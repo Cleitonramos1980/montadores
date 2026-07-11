@@ -8,6 +8,7 @@ import { ProviderService } from "../services/ProviderService";
 import { ProviderNotificationService } from "../services/ProviderNotificationService";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { param, asyncRoute } from "../utils/route";
+import { httpUrl } from "../utils/validators";
 
 export const providersRouter = Router();
 
@@ -71,6 +72,7 @@ providersRouter.get("/providers/winthor/search", asyncRoute(async (req, res) => 
 
 providersRouter.get("/providers/:id/profile", asyncRoute(async (req, res) => {
   const id = param(req.params.id);
+  await assertProviderOwnership(req, id);
   const [provider, avgScore, totalJobs, payments] = await Promise.all([
     providers.getById(id),
     queryOne<{ avg_score: number | null }>(
@@ -107,9 +109,10 @@ providersRouter.get("/providers/:id/profile", asyncRoute(async (req, res) => {
   });
 }));
 
-providersRouter.get("/providers/:id", asyncRoute(async (req, res) =>
-  res.json(await providers.getById(param(req.params.id)))
-));
+providersRouter.get("/providers/:id", asyncRoute(async (req, res) => {
+  await assertProviderOwnership(req, param(req.params.id));
+  res.json(await providers.getById(param(req.params.id)));
+}));
 
 // ── Status transitions ────────────────────────────────────────────────────────
 
@@ -151,15 +154,16 @@ providersRouter.get("/providers/:id/commissions/monthly", asyncRoute(async (req,
 
 // ── Unavailability ────────────────────────────────────────────────────────────
 
-providersRouter.get("/providers/:id/unavailability", asyncRoute(async (req, res) =>
+providersRouter.get("/providers/:id/unavailability", asyncRoute(async (req, res) => {
+  await assertProviderOwnership(req, param(req.params.id));
   res.json(await queryRows(
     `SELECT ID, TO_CHAR(UNAVAIL_DATE, 'YYYY-MM-DD') AS UNAVAIL_DATE, REASON
      FROM MONT_PROVIDER_UNAVAILABILITY
      WHERE PROVIDER_ID = :providerId AND UNAVAIL_DATE >= SYSDATE - 1
      ORDER BY UNAVAIL_DATE`,
     { providerId: param(req.params.id) },
-  ))
-));
+  ));
+}));
 
 providersRouter.post("/providers/:id/unavailability", asyncRoute(async (req, res) => {
   const providerId = param(req.params.id);
@@ -198,7 +202,8 @@ providersRouter.delete("/providers/:id/unavailability/:date", asyncRoute(async (
 
 // ── Certifications ────────────────────────────────────────────────────────────
 
-providersRouter.get("/providers/:id/certifications", asyncRoute(async (req, res) =>
+providersRouter.get("/providers/:id/certifications", asyncRoute(async (req, res) => {
+  await assertProviderOwnership(req, param(req.params.id));
   res.json(await queryRows(
     `SELECT ID, CERT_TYPE, FILE_URL,
             TO_CHAR(ISSUED_AT, 'YYYY-MM-DD') AS ISSUED_AT,
@@ -208,15 +213,15 @@ providersRouter.get("/providers/:id/certifications", asyncRoute(async (req, res)
      WHERE PROVIDER_ID = :providerId
      ORDER BY CERT_TYPE`,
     { providerId: param(req.params.id) },
-  ))
-));
+  ));
+}));
 
 providersRouter.post("/providers/:id/certifications", asyncRoute(async (req, res) => {
   const providerId = param(req.params.id);
   await assertProviderOwnership(req, providerId);
   const body = z.object({
     certType:   z.string().min(3).max(80),
-    fileUrl:    z.string().max(2000).optional(),
+    fileUrl:    httpUrl.optional(),
     issuedAt:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     status:     z.enum(["PENDENTE", "VALIDO", "EXPIRADO", "REPROVADO"]).default("PENDENTE"),
@@ -264,7 +269,8 @@ providersRouter.patch("/providers/:id/certifications/:certId", asyncRoute(async 
 
 // ── Reworks (read-only per provider) ─────────────────────────────────────────
 
-providersRouter.get("/providers/:id/reworks", asyncRoute(async (req, res) =>
+providersRouter.get("/providers/:id/reworks", asyncRoute(async (req, res) => {
+  await assertProviderOwnership(req, param(req.params.id));
   res.json(await queryRows(
     `SELECT r.ID, r.REASON, r.STATUS, r.CREATED_AT,
             s.REASON AS SAC_REASON, o.NUMPED
@@ -276,8 +282,8 @@ providersRouter.get("/providers/:id/reworks", asyncRoute(async (req, res) =>
      ORDER BY r.CREATED_AT DESC
      FETCH FIRST 50 ROWS ONLY`,
     { providerId: param(req.params.id) },
-  ))
-));
+  ));
+}));
 
 // ── Reworks global CRUD ───────────────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { authMiddleware, requireRole } from "../middleware/auth";
 import { isOracleEnabled, isOraclePoolInitialized } from "../db/oracle";
+import { httpUrl } from "../utils/validators";
 import { AuthService } from "../services/AuthService";
 import { AssemblyService } from "../services/AssemblyService";
 import { OrderService } from "../services/OrderService";
@@ -39,6 +40,7 @@ const evalLinks = new EvaluationLinkService();
 // Necessárias porque este router é montado primeiro e sombreia aquelas rotas.
 const adminGestor = requireRole("ADMIN", "GESTOR");
 const financeiro  = requireRole("FINANCEIRO", "ADMIN", "GESTOR");
+const operacao    = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA");
 const staff       = requireRole("ADMIN", "GESTOR", "OPERACAO", "FINANCEIRO", "LOGISTICA", "SAC");
 
 const param = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : String(value ?? "");
@@ -68,6 +70,20 @@ api.get("/health", asyncRoute(async (_req, res) => {
     }
   }
   res.json({ ok: true, service: "app-montadores", db });
+}));
+
+// Readiness — para orquestradores (Docker/K8s/LB). Responde 503 quando o banco não
+// está pronto, para que a instância seja reciclada/retirada do balanceamento (o /health
+// é liveness e sempre responde 200). 'disabled' (Oracle não configurado) conta como pronto.
+api.get("/ready", asyncRoute(async (_req, res) => {
+  if (!isOracleEnabled()) { res.json({ ready: true, db: "disabled" }); return; }
+  try {
+    const { queryOne } = await import("../db/db");
+    await queryOne("SELECT 1 AS OK FROM DUAL");
+    res.json({ ready: true, db: "ok" });
+  } catch {
+    res.status(503).json({ ready: false, db: "error" });
+  }
 }));
 
 api.get("/public/branding", (_req, res) => {
@@ -205,7 +221,7 @@ api.get("/orders", asyncRoute(async (req, res) =>
   }))
 ));
 api.get("/orders/:id", asyncRoute(async (req, res) => res.json(await orders.detail(param(req.params.id)))));
-api.post("/orders/:id/public-token", asyncRoute(async (req, res) => res.status(201).json(await tokens.create(param(req.params.id), "JORNADA_CLIENTE"))));
+api.post("/orders/:id/public-token", operacao, asyncRoute(async (req, res) => res.status(201).json(await tokens.create(param(req.params.id), "JORNADA_CLIENTE"))));
 
 // Providers
 api.post("/providers", asyncRoute(async (req, res) => {
@@ -257,9 +273,9 @@ api.post("/providers/:id/reactivate", adminGestor, asyncRoute(async (req, res) =
   res.json(await providers.reactivate(param(req.params.id), req.user!.sub, body.justification));
 }));
 
-// Scheduling
-api.get("/orders/:id/slots", asyncRoute(async (req, res) => res.json(await scheduling.availableSlots(param(req.params.id)))));
-api.post("/orders/:id/schedule", asyncRoute(async (req, res) => {
+// Scheduling — operação interna (nunca acessível a MONTADOR: evitaria auto-atribuição)
+api.get("/orders/:id/slots", operacao, asyncRoute(async (req, res) => res.json(await scheduling.availableSlots(param(req.params.id)))));
+api.post("/orders/:id/schedule", operacao, asyncRoute(async (req, res) => {
   const body = z.object({ providerId: z.string(), date: z.string(), period: z.string() }).parse(req.body);
   res.status(201).json(await scheduling.schedule(param(req.params.id), body.providerId, body.date, body.period));
 }));
@@ -286,7 +302,7 @@ api.post("/assembly/:jobId/start", asyncRoute(async (req, res) => {
   res.json(await assembly.start(param(req.params.jobId), guard));
 }));
 api.post("/assembly/:jobId/photos", asyncRoute(async (req, res) => {
-  const body = z.object({ fileUrl: z.string().min(3), photoType: z.string().optional() }).parse(req.body);
+  const body = z.object({ fileUrl: httpUrl, photoType: z.string().optional() }).parse(req.body);
   const guard = await resolveAssemblyProviderGuard(req);
   res.status(201).json(await assembly.addPhoto(param(req.params.jobId), body.fileUrl, body.photoType, guard));
 }));
@@ -336,7 +352,7 @@ api.get("/assembly/jobs", asyncRoute(async (req, res) => {
 // Provider invoice upload
 api.post("/assembly/:jobId/invoice", asyncRoute(async (req, res) => {
   const { execDml: dml, queryOne: qo } = await import("../db/db");
-  const body = z.object({ invoiceUrl: z.string().url().min(5) }).parse(req.body);
+  const body = z.object({ invoiceUrl: httpUrl }).parse(req.body);
   const jobId = param(req.params.jobId);
 
   const job = await qo<{ id: string; provider_id: string }>(
@@ -465,9 +481,9 @@ api.post("/reviews/atendimento/:numped/marcar-enviado", asyncRoute(async (req, r
   res.status(201).json(await reviews.marcarAtendimentoEnviado(numped));
 }));
 
-// Message templates
-api.get("/message-templates", asyncRoute(async (_req, res) => res.json(await messageTemplates.list())));
-api.put("/message-templates/:eventType", asyncRoute(async (req, res) => {
+// Message templates — leitura para staff, escrita só ADMIN/GESTOR (conteúdo enviado ao cliente)
+api.get("/message-templates", staff, asyncRoute(async (_req, res) => res.json(await messageTemplates.list())));
+api.put("/message-templates/:eventType", adminGestor, asyncRoute(async (req, res) => {
   const body = z.object({
     channel:        z.enum(["WHATSAPP", "SMS", "EMAIL"]),
     subject:        z.string().optional(),

@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { logger } from "../logger";
 import { AppError } from "../errors";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { json } from "../db/database";
@@ -28,10 +29,10 @@ export class ProviderService {
           email:      input.email      ? String(input.email)      : undefined,
         });
         codfornec = String(newCode);
-        console.log(`[ProviderService] Fornecedor inserido na PCFORNEC com CODFORNEC=${newCode}`);
+        logger.info({ codfornec: newCode }, "[provider] fornecedor inserido na PCFORNEC");
       } catch (err) {
         // Non-fatal: PCFORNEC insert failure should not block MONT_PROVIDERS registration
-        console.warn("[ProviderService] Falha ao inserir na PCFORNEC:", err instanceof Error ? err.message : err);
+        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[provider] falha ao inserir na PCFORNEC");
       }
     }
 

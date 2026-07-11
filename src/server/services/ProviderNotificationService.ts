@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { features } from "../config";
+import { logger } from "../logger";
 import { WhatsAppProviderService, normalizePhone } from "./WhatsAppProviderService";
 
 export type ProviderNotificationType = "NOVA_MONTAGEM_AGENDADA_MONTADOR";
@@ -15,6 +16,8 @@ export type ProviderNotificationResult = {
     | "IGNORADO_SEM_TELEFONE";
   notificationId?: string;
   reason?: string;
+  /** true quando o WhatsApp foi entregue ao montador; false se o canal falhou (in-app criada mesmo assim). */
+  channelDelivered?: boolean;
 };
 
 export class ProviderNotificationService {
@@ -105,7 +108,7 @@ export class ProviderNotificationService {
         effectiveTo = pilotCfg?.config_value?.trim() ?? null;
         modoEnvio   = "HOMOLOGACAO";
         if (!effectiveTo) {
-          console.warn("[ProviderNotification] HOMOLOGACAO sem HOMOLOGACAO_PILOT_PHONE configurado — simulando");
+          logger.warn("[provider-notif] HOMOLOGACAO sem HOMOLOGACAO_PILOT_PHONE — simulando");
           modoEnvio = "DRY_RUN";
         }
       } else {
@@ -138,6 +141,7 @@ export class ProviderNotificationService {
       return { status: "SIMULADO_DRY_RUN", notificationId };
     }
 
+    let channelDelivered = false;
     // WhatsApp channel — effectiveTo já é o destino autorizado (original ou 347818)
     if (features.providerWhatsAppNotifications && effectiveTo) {
       const msgText =
@@ -152,12 +156,15 @@ export class ProviderNotificationService {
           "UPDATE MONT_PROVIDER_NOTIFICATIONS SET SENT_AT = SYSTIMESTAMP WHERE ID = :id",
           { id: notificationId },
         );
+        channelDelivered = true;
       } else {
-        console.error(`[ProviderNotification] WhatsApp send error (${modoEnvio}): ${result.error ?? result.status}`);
+        logger.error({ err: result.error ?? result.status, modoEnvio, notificationId }, "[provider-notif] falha no envio WhatsApp ao montador");
       }
     }
 
-    return { status: "CRIADO", notificationId };
+    // channelDelivered reflete a entrega real no canal: a notificação in-app é sempre
+    // criada, mas o chamador/UI precisa saber que o WhatsApp ao montador pode ter falhado.
+    return { status: "CRIADO", notificationId, channelDelivered };
   }
 
   async listForProvider(providerId: string, unreadOnly = false): Promise<unknown[]> {

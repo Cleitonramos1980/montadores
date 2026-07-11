@@ -1,5 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne } from "../db/db";
+import { logger } from "../logger";
 
 const OPT_OUT_KEYWORDS = new Set(["SAIR", "PARAR", "STOP", "CANCELAR", "0", "NAO QUERO", "NÃO QUERO"]);
 
@@ -59,19 +60,21 @@ export class InboundWebhookService {
     let action = "NONE";
 
     if (isOptOut) {
-      // Find customer by phone number
+      // Sem .catch mascarando: um erro de banco no lookup/UPDATE deve propagar para o
+      // handler → webhook responde !2xx → provedor reentrega (at-least-once). Só marca
+      // OPT_OUT_REGISTERED DEPOIS de o UPDATE persistir (antes marcava mesmo em falha).
       const customer = await queryOne<{ codcli: string }>(
         "SELECT CODCLI FROM MONT_CUSTOMERS WHERE REPLACE(REPLACE(REPLACE(PHONE,' ',''),'-',''),'(','') LIKE '%' || :phone || '%'",
         { phone: msg.fromNumber.slice(-8) },
-      ).catch(() => null);
+      );
 
       if (customer) {
         await execDml(
           `UPDATE MONT_CUSTOMERS SET OPT_OUT_WHATSAPP = 1, UPDATED_AT = SYSTIMESTAMP WHERE CODCLI = :codcli`,
           { codcli: customer.codcli },
-        ).catch(() => {});
+        );
         action = "OPT_OUT_REGISTERED";
-        console.log(`[InboundWebhook] Opt-out registrado para CODCLI=${customer.codcli} via ${msg.provider}`);
+        logger.info({ codcli: customer.codcli, provider: msg.provider }, "[inbound] opt-out registrado");
       } else {
         action = "OPT_OUT_CUSTOMER_NOT_FOUND";
       }
@@ -90,7 +93,7 @@ export class InboundWebhookService {
         payload:  JSON.stringify(msg.rawPayload).slice(0, 4000),
         action,
       },
-    ).catch((e) => console.error("[InboundWebhook] Erro ao gravar log:", (e as Error).message));
+    ).catch((e) => logger.error({ err: (e as Error).message }, "[inbound] erro ao gravar log de entrada"));
 
     return { action };
   }

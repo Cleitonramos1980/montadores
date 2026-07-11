@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid";
-import { execDml, queryOne, queryRows } from "../db/db";
+import { execDml, queryOne, queryRows, withTransaction } from "../db/db";
 import { json } from "../db/database";
 import { WinthorAdapter } from "../oracle/WinthorAdapter";
 import { EventService } from "./EventService";
@@ -80,24 +80,28 @@ export class WinthorSyncService {
         oraclePayload: json({ order: wOrder, invoice, cargo, transporter }),
       });
 
-      // 8. Re-sync order items (delete + insert to handle quantity/price changes)
-      await execDml("DELETE FROM MONT_ORDER_ITEMS WHERE ORDER_ID = :orderId", { orderId });
-      for (const item of items) {
-        await execDml(
-          `INSERT INTO MONT_ORDER_ITEMS
-           (ID, ORDER_ID, PRODUCT_ID, DESCRIPTION, QUANTITY, REQUIRES_ASSEMBLY, ASSEMBLY_COST)
-           VALUES (:id, :orderId, :productId, :description, :quantity, :requiresAssembly, :assemblyCost)`,
-          {
-            id: uuid(),
-            orderId,
-            productId: String(item.CODPROD ?? ""),
-            description: String(item.DESCRICAO ?? ""),
-            quantity: Number(item.QT ?? 0),
-            requiresAssembly: Number(item.REQUER_MONTAGEM ?? 0),
-            assemblyCost: Number(item.VLMAODEOBRA ?? 0),
-          },
-        );
-      }
+      // 8. Re-sync order items (delete + insert to handle quantity/price changes).
+      // Atômico: DELETE e re-INSERT na mesma transação — senão um crash entre os dois
+      // deixa o pedido SEM itens, ou uma corrida gera itens duplicados.
+      await withTransaction(async (tx) => {
+        await tx.exec("DELETE FROM MONT_ORDER_ITEMS WHERE ORDER_ID = :orderId", { orderId });
+        for (const item of items) {
+          await tx.exec(
+            `INSERT INTO MONT_ORDER_ITEMS
+             (ID, ORDER_ID, PRODUCT_ID, DESCRIPTION, QUANTITY, REQUIRES_ASSEMBLY, ASSEMBLY_COST)
+             VALUES (:id, :orderId, :productId, :description, :quantity, :requiresAssembly, :assemblyCost)`,
+            {
+              id: uuid(),
+              orderId,
+              productId: String(item.CODPROD ?? ""),
+              description: String(item.DESCRICAO ?? ""),
+              quantity: Number(item.QT ?? 0),
+              requiresAssembly: Number(item.REQUER_MONTAGEM ?? 0),
+              assemblyCost: Number(item.VLMAODEOBRA ?? 0),
+            },
+          );
+        }
+      });
 
       // 9. Emit events (idempotent — duplicates are skipped)
 

@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { logger } from "../logger";
 import { AppError } from "../errors";
 import { execDml, queryOne, queryRows, withTransaction } from "../db/db";
 import { EvaluationLinkService } from "./EvaluationLinkService";
@@ -68,10 +69,13 @@ export class EvaluationResponseService {
     // If the order isn't synced yet, trigger WinThor sync on the fly.
     let montOrder: { id: string; codcli: string } | null = null;
     if (linkInfo.numped) {
+      // Sem .catch(()=>null): queryOne já retorna null para "sem linhas"; um ERRO de
+      // banco deve propagar (senão o antifraude/bloqueio de pagamento seria pulado em
+      // silêncio e a avaliação retornaria 200 como se estivesse tudo certo).
       montOrder = await queryOne<{ id: string; codcli: string }>(
         "SELECT ID, CODCLI FROM MONT_ORDERS WHERE NUMPED = :numped",
         { numped: linkInfo.numped },
-      ).catch(() => null);
+      );
 
       if (!montOrder) {
         try {
@@ -79,9 +83,9 @@ export class EvaluationResponseService {
           montOrder = await queryOne<{ id: string; codcli: string }>(
             "SELECT ID, CODCLI FROM MONT_ORDERS WHERE NUMPED = :numped",
             { numped: linkInfo.numped },
-          ).catch(() => null);
-        } catch {
-          // Sync failed — eval is still recorded but SAC creation will be skipped
+          );
+        } catch (err) {
+          logger.warn({ err: (err as Error).message, numped: linkInfo.numped }, "[eval] sync WinThor on-the-fly falhou; SAC/bloqueio podem não ser criados");
         }
       }
     }
@@ -152,7 +156,7 @@ export class EvaluationResponseService {
         sacCaseId = sacResult?.id;
         sacTriggered = true;
       } catch (err) {
-        console.error(`[EvaluationResponse] Falha ao abrir SAC para pedido ${montOrder.id}:`, (err as Error).message);
+        logger.error({ err: (err as Error).message, orderId: montOrder.id }, "[eval] falha ao abrir SAC");
       }
 
       // Persiste o vínculo do SAC (não-crítico e isolado — coluna pode não existir em bases antigas).
@@ -162,7 +166,7 @@ export class EvaluationResponseService {
           { trig: sacTriggered ? 1 : 0, sacId: sacCaseId ?? null, id: responseId },
         );
       } catch (err) {
-        console.error(`[EvaluationResponse] Falha ao gravar SAC_CASE_ID (resposta ${responseId}):`, (err as Error).message);
+        logger.error({ err: (err as Error).message, responseId }, "[eval] falha ao gravar SAC_CASE_ID");
       }
 
       // Bloqueio de pagamento em fase de montagem — CRÍTICO, roda independente do SAC.
@@ -181,19 +185,26 @@ export class EvaluationResponseService {
             { id: responseId },
           );
         } catch (err) {
-          console.error(`[EvaluationResponse] Falha ao bloquear pagamento do pedido ${montOrder.id}:`, (err as Error).message);
+          logger.error({ err: (err as Error).message, orderId: montOrder.id }, "[eval] falha ao bloquear pagamento (avaliação negativa)");
         }
       }
     }
 
-    // Auto-release payment on positive (assembly phase only)
+    // Auto-release payment on positive (assembly phase only).
+    // NÃO libera se houver SAC aberto para o job (mesma trava do PaymentService.release,
+    // que este UPDATE direto antes ignorava). Falha é logada, nunca engolida em silêncio.
     if (classification === "POSITIVA" && linkInfo.phase === "MONTAGEM" && montOrder) {
       try {
         await execDml(
-          `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', UPDATED_AT = SYSTIMESTAMP
-           WHERE ASSEMBLY_JOB_ID IN (
+          `UPDATE MONT_PROVIDER_PAYMENTS p SET p.STATUS = 'LIBERADO', p.UPDATED_AT = SYSTIMESTAMP
+           WHERE p.ASSEMBLY_JOB_ID IN (
              SELECT ID FROM MONT_ASSEMBLY_JOBS WHERE ORDER_ID = :orderId
-           ) AND STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE'`,
+           ) AND p.STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE'
+           AND NOT EXISTS (
+             SELECT 1 FROM MONT_SAC_CASES sc
+             WHERE sc.ASSEMBLY_JOB_ID = p.ASSEMBLY_JOB_ID
+               AND sc.STATUS NOT IN ('RESOLVIDO','ENCERRADO','CANCELADO')
+           )`,
           { orderId: montOrder.id },
         );
         paymentImpact = "LIBERADO";
@@ -201,8 +212,8 @@ export class EvaluationResponseService {
           "UPDATE MONT_EVAL_RESPONSES SET PAYMENT_IMPACT = 'LIBERADO' WHERE ID = :id",
           { id: responseId },
         );
-      } catch {
-        // payment update failure doesn't block evaluation
+      } catch (err) {
+        logger.error({ err: (err as Error).message, orderId: montOrder.id }, "[eval] falha ao liberar pagamento em avaliação positiva");
       }
     }
 

@@ -159,16 +159,13 @@ describe("InboundWebhookService.handle — opt-out", () => {
     expect(insertCall).toBeDefined();
   });
 
-  it("erro no banco ao registrar opt-out → não lança, retorna OPT_OUT_REGISTERED mesmo assim", async () => {
+  it("erro no banco ao registrar opt-out → PROPAGA (não marca OPT_OUT_REGISTERED em falha)", async () => {
     mockQueryOne.mockResolvedValueOnce({ codcli: "12345" });
-    // UPDATE falha silenciosamente (catch interno)
-    mockExecDml
-      .mockRejectedValueOnce(new Error("ORA-xxxx"))  // UPDATE opt-out falha
-      .mockResolvedValueOnce(undefined);             // INSERT log ok
+    // UPDATE do opt-out falha — o erro deve propagar para o handler (webhook responde
+    // !2xx → provedor reentrega). Antes o catch engolia e retornava OPT_OUT_REGISTERED
+    // mesmo sem persistir o descadastro (bug APP-010).
+    mockExecDml.mockRejectedValueOnce(new Error("ORA-xxxx")); // UPDATE opt-out falha
 
-    // Não deve lançar
-    const r = await svc.handle({ ...baseMsg, messageBody: "STOP" });
-    // A ação é registrada mesmo que o UPDATE tenha falhado internamente
-    expect(["OPT_OUT_REGISTERED", "OPT_OUT_CUSTOMER_NOT_FOUND", "NONE"]).toContain(r.action);
+    await expect(svc.handle({ ...baseMsg, messageBody: "STOP" })).rejects.toThrow();
   });
 });

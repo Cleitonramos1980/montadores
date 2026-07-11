@@ -457,18 +457,23 @@ paymentsRouter.get("/system/health", asyncRoute(async (_req, res) => {
     } catch { dbStatus = "error"; }
   }
 
+  // Distingue "zero falhas" de "não foi possível consultar": em erro devolve null,
+  // não 0/[] (senão o painel de saúde mostraria verde justamente quando a base de
+  // falhas está inacessível). failuresError sinaliza o problema explicitamente.
+  let failuresError = false;
   const [failureCount, lastSyncRow, recentFailures] = await Promise.all([
-    queryOne<{ cnt: number }>("SELECT COUNT(*) AS CNT FROM MONT_INTEGRATION_FAILURES WHERE RESOLVED_AT IS NULL", {}).catch(() => ({ cnt: 0 })),
+    queryOne<{ cnt: number }>("SELECT COUNT(*) AS CNT FROM MONT_INTEGRATION_FAILURES WHERE RESOLVED_AT IS NULL", {}).catch(() => { failuresError = true; return null; }),
     queryOne<{ iniciado_em: string; run_status: string; pedidos_encontrados: number; eventos_gerados: number }>(
       "SELECT INICIADO_EM, RUN_STATUS, PEDIDOS_ENCONTRADOS, EVENTOS_GERADOS FROM MONT_SYNC_RUNS ORDER BY INICIADO_EM DESC FETCH FIRST 1 ROWS ONLY", {},
     ).catch(() => null),
-    queryRows("SELECT OPERATION, ERROR_MESSAGE, CREATED_AT FROM MONT_INTEGRATION_FAILURES WHERE RESOLVED_AT IS NULL ORDER BY CREATED_AT DESC FETCH FIRST 5 ROWS ONLY", {}).catch((e) => { console.warn("[payments/health] Falha ao carregar integration failures:", (e as Error).message); return []; }),
+    queryRows("SELECT OPERATION, ERROR_MESSAGE, CREATED_AT FROM MONT_INTEGRATION_FAILURES WHERE RESOLVED_AT IS NULL ORDER BY CREATED_AT DESC FETCH FIRST 5 ROWS ONLY", {}).catch(() => { failuresError = true; return null; }),
   ]);
 
   res.json({
     db: { status: dbStatus, latencyMs: dbLatencyMs },
-    openFailures: Number((failureCount as Record<string, unknown>)?.cnt ?? 0),
+    openFailures: failureCount ? Number((failureCount as Record<string, unknown>).cnt ?? 0) : null,
     lastSync: lastSyncRow ?? null,
-    recentFailures,
+    recentFailures: recentFailures ?? null,
+    failuresQueryError: failuresError,
   });
 }));

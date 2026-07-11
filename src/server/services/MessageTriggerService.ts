@@ -55,8 +55,14 @@ export class MessageTriggerService {
     const globalModeRow = await queryOne<{ config_value: string }>(
       "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'MESSAGE_TRIGGER_MODE'",
     );
-    const globalMode    = globalModeRow?.config_value ?? "DRY_RUN";
-    const effectiveMode = globalMode === "DRY_RUN" ? "DRY_RUN" : eventConfig.modo_envio;
+    const globalMode = globalModeRow?.config_value ?? "DRY_RUN";
+    // Modo global é TETO de segurança rígido: um evento nunca envia "mais real" que o
+    // modo global. Se global=HOMOLOGACAO e o evento tiver modo_envio=PRODUCAO, prevalece
+    // HOMOLOGACAO (antes o PRODUCAO do evento vazava mensagem ao cliente real).
+    const modeRank: Record<string, number> = { DRY_RUN: 0, HOMOLOGACAO: 1, PRODUCAO: 2 };
+    const eventMode = eventConfig.modo_envio ?? "DRY_RUN";
+    const effectiveMode =
+      (modeRank[eventMode] ?? 0) <= (modeRank[globalMode] ?? 0) ? eventMode : globalMode;
 
     // 3. DRY_RUN: short-circuit with deduplication — never calls WhatsApp
     if (effectiveMode === "DRY_RUN") {

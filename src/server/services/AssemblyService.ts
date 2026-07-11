@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid";
-import { execDml, queryOne } from "../db/db";
+import { execDml, queryOne, withTransaction } from "../db/db";
 import { AppError, ForbiddenError } from "../errors";
 import { EventService } from "./EventService";
 
@@ -9,8 +9,8 @@ export class AssemblyService {
   // requestingProviderId: pass the caller's provider ID when user is MONTADOR.
   // Pass null to skip ownership check (ADMIN / GESTOR callers).
   async start(jobId: string, requestingProviderId: string | null = null) {
-    const job = await queryOne<{ id: string; order_id: string; numped: string; codcli: string; provider_id: string }>(
-      `SELECT a.ID, a.ORDER_ID, a.PROVIDER_ID, o.NUMPED, o.CODCLI
+    const job = await queryOne<{ id: string; order_id: string; numped: string; codcli: string; provider_id: string; status: string }>(
+      `SELECT a.ID, a.ORDER_ID, a.PROVIDER_ID, a.STATUS, o.NUMPED, o.CODCLI
        FROM MONT_ASSEMBLY_JOBS a
        JOIN MONT_ORDERS o ON o.ID = a.ORDER_ID
        WHERE a.ID = :jobId`,
@@ -20,16 +20,22 @@ export class AssemblyService {
     if (requestingProviderId !== null && job.provider_id !== requestingProviderId) {
       throw new ForbiddenError("Você não tem permissão para operar esta montagem.");
     }
+    // Só pode iniciar uma montagem AGENDADA (impede reabrir uma já em execução/finalizada).
+    if (job.status !== "AGENDADA") {
+      throw new AppError(`Montagem no estado ${job.status} não pode ser iniciada.`, 409, "CONFLICT");
+    }
 
-    await execDml(
-      "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'EM_EXECUCAO', STARTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: jobId },
-    );
-
-    await execDml(
-      "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_INICIADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: job.order_id },
-    );
+    // Atômico: status do job + status do pedido gravam juntos.
+    await withTransaction(async (tx) => {
+      await tx.exec(
+        "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'EM_EXECUCAO', STARTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id AND STATUS = 'AGENDADA'",
+        { id: jobId },
+      );
+      await tx.exec(
+        "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_INICIADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+        { id: job.order_id },
+      );
+    });
 
     await this.events.emit({
       type: "MONTAGEM_INICIADA",
@@ -81,8 +87,8 @@ export class AssemblyService {
   }
 
   async finish(jobId: string, requestingProviderId: string | null = null) {
-    const job = await queryOne<{ id: string; order_id: string; numped: string; codcli: string; provider_id: string }>(
-      `SELECT a.ID, a.ORDER_ID, a.PROVIDER_ID, o.NUMPED, o.CODCLI
+    const job = await queryOne<{ id: string; order_id: string; numped: string; codcli: string; provider_id: string; status: string }>(
+      `SELECT a.ID, a.ORDER_ID, a.PROVIDER_ID, a.STATUS, o.NUMPED, o.CODCLI
        FROM MONT_ASSEMBLY_JOBS a
        JOIN MONT_ORDERS o ON o.ID = a.ORDER_ID
        WHERE a.ID = :jobId`,
@@ -92,6 +98,11 @@ export class AssemblyService {
     if (requestingProviderId !== null && job.provider_id !== requestingProviderId) {
       throw new ForbiddenError("Você não tem permissão para operar esta montagem.");
     }
+    // Só finaliza uma montagem EM_EXECUCAO. Impede refinalizar (que regrediria o
+    // pagamento já bloqueado/liberado/pago de volta a AGUARDANDO_AVALIACAO_CLIENTE).
+    if (job.status !== "EM_EXECUCAO") {
+      throw new AppError(`Montagem no estado ${job.status} não pode ser finalizada.`, 409, "CONFLICT");
+    }
 
     const photos = await queryOne<{ value: number }>(
       "SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_PHOTOS WHERE ASSEMBLY_JOB_ID = :jobId",
@@ -99,18 +110,22 @@ export class AssemblyService {
     );
     if (Number(photos?.value ?? 0) < 1) throw new Error("Montagem não pode ser finalizada sem fotos obrigatórias.");
 
-    await execDml(
-      "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'FINALIZADA', FINISHED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: jobId },
-    );
-    await execDml(
-      "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE', UPDATED_AT = SYSTIMESTAMP WHERE ASSEMBLY_JOB_ID = :jobId",
-      { jobId },
-    );
-    await execDml(
-      "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_FINALIZADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: job.order_id },
-    );
+    // Atômico. O UPDATE do pagamento é condicional (só do estado inicial) para NUNCA
+    // reverter um pagamento já bloqueado por SAC/avaliação, liberado ou pago.
+    await withTransaction(async (tx) => {
+      await tx.exec(
+        "UPDATE MONT_ASSEMBLY_JOBS SET STATUS = 'FINALIZADA', FINISHED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id AND STATUS = 'EM_EXECUCAO'",
+        { id: jobId },
+      );
+      await tx.exec(
+        "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE', UPDATED_AT = SYSTIMESTAMP WHERE ASSEMBLY_JOB_ID = :jobId AND STATUS = 'AGUARDANDO_FINALIZACAO'",
+        { jobId },
+      );
+      await tx.exec(
+        "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'MONTAGEM_FINALIZADA', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+        { id: job.order_id },
+      );
+    });
 
     await this.events.emit({
       type: "MONTAGEM_FINALIZADA",
