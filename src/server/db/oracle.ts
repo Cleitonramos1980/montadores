@@ -36,10 +36,15 @@ export async function closeOraclePool(): Promise<void> {
   initialized = false;
 }
 
+// Aborta qualquer round-trip que exceda este tempo, evitando que uma query pendurada
+// segure a conexão para sempre e esgote o pool (travando toda a API).
+const CALL_TIMEOUT_MS = Number(process.env.ORACLE_CALL_TIMEOUT_MS ?? 30_000);
+
 export async function withOracleConnection<T>(handler: (connection: any) => Promise<T>): Promise<T> {
   const pool = oracledb.getPool(config.oracle.poolAlias);
   const connection = await pool.getConnection();
   try {
+    connection.callTimeout = CALL_TIMEOUT_MS;
     return await handler(connection);
   } finally {
     await connection.close();

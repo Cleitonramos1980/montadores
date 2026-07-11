@@ -62,6 +62,11 @@ export class PaymentService {
       { id: paymentId },
     );
     if (!payment) throw new AppError("Pagamento não encontrado.", 404, "NOT_FOUND");
+    // Impede regressão de estado: um pagamento já liberado/programado/pago não pode
+    // voltar a LIBERADO (senão pay() o aceitaria de novo → pagamento duplo).
+    if (["LIBERADO", "PROGRAMADO", "PAGO"].includes(payment.status)) {
+      throw new AppError(`Pagamento no estado ${payment.status} não pode ser liberado novamente.`, 409, "CONFLICT");
+    }
 
     const sacOpen = await queryOne<{ value: number }>(
       `SELECT COUNT(*) AS VALUE FROM MONT_SAC_CASES

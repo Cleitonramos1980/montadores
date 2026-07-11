@@ -862,6 +862,59 @@ describe("16. Edge cases e segurança de entrada", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 16b. CONTROLE DE ACESSO POR PAPEL (RBAC) — token MONTADOR deve receber 403
+// nas rotas administrativas/financeiras (regressão do bypass P0).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("16b. RBAC — MONTADOR não acessa rotas privilegiadas", () => {
+  let montadorToken = "";
+
+  beforeAll(async () => {
+    const r = await post("/auth/login", {
+      email: "test.montador.regress@example.com",
+      password: "Montador@Regress1!",
+    });
+    montadorToken = r.body?.token ?? "";
+  });
+
+  it("MONTADOR em POST /payments/:id/release retorna 403", async () => {
+    if (!montadorToken) return;
+    const r = await post("/payments/qualquer/release", { justification: "tentativa indevida" }, montadorToken);
+    expect(r.status).toBe(403);
+  });
+
+  it("MONTADOR em POST /providers/:id/approve retorna 403", async () => {
+    if (!montadorToken) return;
+    const r = await post("/providers/qualquer/approve", {}, montadorToken);
+    expect(r.status).toBe(403);
+  });
+
+  it("MONTADOR em PUT /commissions/:codprod retorna 403", async () => {
+    if (!montadorToken) return;
+    const r = await put("/commissions/123", { calculationType: "PERCENTAGE", percentageRate: 5 }, montadorToken);
+    expect(r.status).toBe(403);
+  });
+
+  it("MONTADOR em GET /audit-logs retorna 403", async () => {
+    if (!montadorToken) return;
+    const r = await get("/audit-logs", montadorToken);
+    expect(r.status).toBe(403);
+  });
+
+  it("MONTADOR em POST /fluxo/sync/run retorna 403", async () => {
+    if (!montadorToken) return;
+    const r = await post("/fluxo/sync/run", { modo: "DRY_RUN" }, montadorToken);
+    expect(r.status).toBe(403);
+  });
+
+  it("ADMIN nas mesmas rotas NÃO recebe 403 (contraprova)", async () => {
+    const r = await get("/audit-logs", adminToken);
+    expect(r.status).not.toBe(403);
+    expect(r.status).not.toBe(401);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 17. LIMPEZA PÓS-TESTE
 // ─────────────────────────────────────────────────────────────────────────────
 

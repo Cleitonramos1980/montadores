@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { AppError } from "../errors";
 import { Router } from "express";
 import { z } from "zod";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, requireRole } from "../middleware/auth";
 import { isOracleEnabled, isOraclePoolInitialized } from "../db/oracle";
 import { AuthService } from "../services/AuthService";
 import { AssemblyService } from "../services/AssemblyService";
@@ -35,6 +35,12 @@ const flow = new FlowService();
 const messageTemplates = new MessageTemplateService();
 const evalLinks = new EvaluationLinkService();
 
+// Guardas de papel — espelham os routers dedicados (payments.ts / providers.ts).
+// Necessárias porque este router é montado primeiro e sombreia aquelas rotas.
+const adminGestor = requireRole("ADMIN", "GESTOR");
+const financeiro  = requireRole("FINANCEIRO", "ADMIN", "GESTOR");
+const staff       = requireRole("ADMIN", "GESTOR", "OPERACAO", "FINANCEIRO", "LOGISTICA", "SAC");
+
 const param = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : String(value ?? "");
 
 function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {
@@ -45,10 +51,24 @@ function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) =
 
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 
-api.get("/health", (_req, res) => {
-  const db = !isOracleEnabled() ? "disabled" : isOraclePoolInitialized() ? "ok" : "error";
+api.get("/health", asyncRoute(async (_req, res) => {
+  let db: "disabled" | "ok" | "error" = "disabled";
+  if (isOracleEnabled()) {
+    if (!isOraclePoolInitialized()) {
+      db = "error";
+    } else {
+      // Executa uma query real (não só a flag do pool) para detectar conexões mortas.
+      try {
+        const { queryOne } = await import("../db/db");
+        await queryOne("SELECT 1 AS OK FROM DUAL");
+        db = "ok";
+      } catch {
+        db = "error";
+      }
+    }
+  }
   res.json({ ok: true, service: "app-montadores", db });
-});
+}));
 
 api.get("/public/branding", (_req, res) => {
   res.json({
@@ -222,17 +242,17 @@ api.get("/providers/winthor/search", asyncRoute(async (req, res) => {
 }));
 
 api.get("/providers/:id", asyncRoute(async (req, res) => res.json(await providers.getById(param(req.params.id)))));
-api.post("/providers/:id/approve", asyncRoute(async (req, res) =>
+api.post("/providers/:id/approve", adminGestor, asyncRoute(async (req, res) =>
   res.json(await providers.approve(param(req.params.id), req.user!.sub, req.body.justification ?? "Aprovado pela operação"))
 ));
-api.post("/providers/:id/reject", asyncRoute(async (req, res) =>
+api.post("/providers/:id/reject", adminGestor, asyncRoute(async (req, res) =>
   res.json(await providers.reject(param(req.params.id), req.user!.sub, req.body.justification ?? "Reprovado pela operação"))
 ));
-api.post("/providers/:id/suspend", asyncRoute(async (req, res) => {
+api.post("/providers/:id/suspend", adminGestor, asyncRoute(async (req, res) => {
   const body = z.object({ justification: z.string().min(3) }).parse(req.body);
   res.json(await providers.suspend(param(req.params.id), req.user!.sub, body.justification));
 }));
-api.post("/providers/:id/reactivate", asyncRoute(async (req, res) => {
+api.post("/providers/:id/reactivate", adminGestor, asyncRoute(async (req, res) => {
   const body = z.object({ justification: z.string().min(3) }).parse(req.body);
   res.json(await providers.reactivate(param(req.params.id), req.user!.sub, body.justification));
 }));
@@ -511,17 +531,17 @@ api.post("/sac/:id/close", asyncRoute(async (req, res) => {
 }));
 
 // Payments
-api.get("/payments", asyncRoute(async (_req, res) => res.json(await payments.list())));
-api.post("/payments/:id/release", asyncRoute(async (req, res) => {
+api.get("/payments", financeiro, asyncRoute(async (_req, res) => res.json(await payments.list())));
+api.post("/payments/:id/release", financeiro, asyncRoute(async (req, res) => {
   const body = z.object({ justification: z.string().min(5) }).parse(req.body);
   res.json(await payments.release(param(req.params.id), req.user!.sub, body.justification));
 }));
-api.post("/payments/:id/program", asyncRoute(async (req, res) => {
+api.post("/payments/:id/program", financeiro, asyncRoute(async (req, res) => {
   const body = z.object({ programmedFor: z.string() }).parse(req.body);
   res.json(await payments.program(param(req.params.id), body.programmedFor, req.user!.sub));
 }));
-api.post("/payments/:id/pay", asyncRoute(async (req, res) => res.json(await payments.pay(param(req.params.id), req.user!.sub))));
-api.patch("/payments/:id/amount", asyncRoute(async (req, res) => {
+api.post("/payments/:id/pay", financeiro, asyncRoute(async (req, res) => res.json(await payments.pay(param(req.params.id), req.user!.sub))));
+api.patch("/payments/:id/amount", financeiro, asyncRoute(async (req, res) => {
   const body = z.object({
     amount:        z.number().min(0),
     justification: z.string().min(10),
@@ -531,10 +551,10 @@ api.patch("/payments/:id/amount", asyncRoute(async (req, res) => {
 
 // WinThor integration
 api.get("/integration/winthor", asyncRoute(async (_req, res) => res.json(await winthor.failures())));
-api.post("/integration/winthor/orders/:numped/sync", asyncRoute(async (req, res) =>
+api.post("/integration/winthor/orders/:numped/sync", adminGestor, asyncRoute(async (req, res) =>
   res.status(202).json(await winthor.syncOrder(param(req.params.numped), req.user!.sub))
 ));
-api.post("/integration/winthor/sync-batch", asyncRoute(async (req, res) => {
+api.post("/integration/winthor/sync-batch", adminGestor, asyncRoute(async (req, res) => {
   const body = z.object({ since: z.string().optional() }).parse(req.body);
   const since = body.since ? new Date(body.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
   res.status(202).json(await winthor.syncOrdersBatch(since, req.user!.sub));
@@ -543,7 +563,7 @@ api.post("/integration/winthor/sync-batch", asyncRoute(async (req, res) => {
 // WinThor lookup (read-only)
 
 // List PCPEDC with pagination, filters and sync status
-api.get("/winthor/orders", asyncRoute(async (req, res) => {
+api.get("/winthor/orders", staff, asyncRoute(async (req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) { res.json([]); return; }
   const { queryRows: qr } = await import("../db/db");
@@ -601,7 +621,7 @@ api.get("/winthor/orders", asyncRoute(async (req, res) => {
 }));
 
 // Single order detail with items and sync status
-api.get("/winthor/orders/:numped", asyncRoute(async (req, res) => {
+api.get("/winthor/orders/:numped", staff, asyncRoute(async (req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) throw new Error("Oracle não disponível.");
   const adapter = new (await import("../oracle/WinthorAdapter")).WinthorAdapter();
@@ -619,7 +639,7 @@ api.get("/winthor/orders/:numped", asyncRoute(async (req, res) => {
   );
   res.json({ order: orderRows[0], items, invoice: invoices[0] ?? null, synced_id: synced?.id ?? null });
 }));
-api.get("/winthor/customers/:codcli", asyncRoute(async (req, res) => {
+api.get("/winthor/customers/:codcli", staff, asyncRoute(async (req, res) => {
   const adapter = new (await import("../oracle/WinthorAdapter")).WinthorAdapter();
   const customer = await adapter.getCustomerById(param(req.params.codcli));
   res.json(customer[0] ?? null);
@@ -672,7 +692,7 @@ api.get("/commissions/search", asyncRoute(async (req, res) => {
 }));
 
 // Upsert commission for a product
-api.put("/commissions/:codprod", asyncRoute(async (req, res) => {
+api.put("/commissions/:codprod", adminGestor, asyncRoute(async (req, res) => {
   const { execDml: dml, queryOne: qo } = await import("../db/db");
   const { v4: uuidv4 } = await import("uuid");
   const body = z.object({
@@ -714,7 +734,7 @@ api.put("/commissions/:codprod", asyncRoute(async (req, res) => {
 }));
 
 // Toggle active or delete commission
-api.delete("/commissions/:codprod", asyncRoute(async (req, res) => {
+api.delete("/commissions/:codprod", adminGestor, asyncRoute(async (req, res) => {
   const { execDml: dml } = await import("../db/db");
   await dml(
     "DELETE FROM MONT_PRODUCT_COMMISSIONS WHERE CODPROD = :codprod",
@@ -723,7 +743,7 @@ api.delete("/commissions/:codprod", asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-api.patch("/commissions/:codprod/toggle", asyncRoute(async (req, res) => {
+api.patch("/commissions/:codprod/toggle", adminGestor, asyncRoute(async (req, res) => {
   const { execDml: dml } = await import("../db/db");
   await dml(
     `UPDATE MONT_PRODUCT_COMMISSIONS
@@ -736,7 +756,7 @@ api.patch("/commissions/:codprod/toggle", asyncRoute(async (req, res) => {
 }));
 
 // Audit logs
-api.get("/audit-logs", asyncRoute(async (_req, res) => {
+api.get("/audit-logs", adminGestor, asyncRoute(async (_req, res) => {
   const { queryRows: qr } = await import("../db/db");
   const rows = await qr(`SELECT * FROM MONT_AUDIT_LOGS ORDER BY CREATED_AT DESC FETCH FIRST 200 ROWS ONLY`);
   res.json(rows);

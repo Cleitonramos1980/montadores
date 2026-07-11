@@ -52,7 +52,7 @@ export class ProviderMatchingService {
     const providers = await queryRows<ProviderRow>(
       `SELECT ID, NAME, CITY, UF, CEP, LATITUDE, LONGITUDE, RADIUS_KM,
               CAPACITY_PER_DAY, REGIONS_JSON, SERVICE_TYPES_JSON,
-              (SELECT AVG(SCORE) FROM MONT_REVIEWS r
+              (SELECT AVG(SCORE) FROM MONT_CUSTOMER_REVIEWS r
                JOIN MONT_ASSEMBLY_JOBS j ON j.ID = r.ASSEMBLY_JOB_ID
                WHERE j.PROVIDER_ID = p.ID) AS AVG_SCORE
        FROM MONT_PROVIDERS p

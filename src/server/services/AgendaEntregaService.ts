@@ -2,6 +2,13 @@ import { v4 as uuid } from "uuid";
 import { execDml, queryOne, queryRows } from "../db/db";
 import { WinthorAgendaRepository } from "../oracle/WinthorAgendaRepository";
 import { MessageLogService } from "./MessageLogService";
+import { WhatsAppProviderService } from "./WhatsAppProviderService";
+
+function renderTemplate(body: string, vars: Record<string, string | null | undefined>): string {
+  return body
+    .replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? `{{${k}}}`)
+    .replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? `{${k}}`);
+}
 
 export type AgendaStatusKey =
   | "AGUARDANDO_ENTREGA"
@@ -46,6 +53,7 @@ export class AgendaEntregaService {
   constructor(
     private readonly repo   = new WinthorAgendaRepository(),
     private readonly msgLog = new MessageLogService(),
+    private readonly wp     = new WhatsAppProviderService(),
   ) {}
 
   async list(params: {
@@ -94,6 +102,19 @@ export class AgendaEntregaService {
     ).catch(() => null);
     const globalMode = modeRow?.config_value ?? "DRY_RUN";
     const effectiveMode = globalMode === "DRY_RUN" ? "DRY_RUN" : modo;
+
+    // Em HOMOLOGACAO todo envio vai para o piloto configurado (nunca ao cliente real).
+    let pilotPhone: string | null = null;
+    if (effectiveMode === "HOMOLOGACAO") {
+      const cfg = await queryOne<{ telefones_teste: string | null }>(
+        "SELECT TELEFONES_TESTE FROM MONT_FLUXO_EVENT_CONFIG WHERE EVENT_KEY = 'ENTREGA_CONFIRMADA_AGENDAR_MONTAGEM'",
+      ).catch(() => null);
+      const fromEvent = (cfg?.telefones_teste ?? "").split(",").map((s) => s.trim()).filter(Boolean)[0];
+      const globalPilot = await queryOne<{ config_value: string }>(
+        "SELECT CONFIG_VALUE FROM MONT_SYNC_CONFIG WHERE CONFIG_KEY = 'HOMOLOGACAO_PILOT_PHONE'",
+      ).catch(() => null);
+      pilotPhone = fromEvent ?? globalPilot?.config_value ?? null;
+    }
 
     for (const row of rows) {
       try {
@@ -175,24 +196,50 @@ export class AgendaEntregaService {
           });
           result.convitesSimulados++;
         } else {
-          // PRODUCAO — send real message (integration hook is future work)
+          // HOMOLOGACAO redireciona ao piloto; PRODUCAO usa o telefone real do cliente.
+          const destino = effectiveMode === "HOMOLOGACAO" ? pilotPhone : telefone;
+          if (!destino) {
+            result.ignorados.push({ numped, motivo: "IGNORADO_SEM_TELEFONE" });
+            await this.msgLog.log({
+              numped, codcli: String(row.codcli),
+              eventKey: "ENTREGA_CONFIRMADA_AGENDAR_MONTAGEM",
+              status: "IGNORADO_SEM_TELEFONE", modoEnvio: effectiveMode,
+              payload: { aviso: "HOMOLOGACAO sem telefone piloto configurado." },
+            });
+            continue;
+          }
+
+          const texto = renderTemplate(template.body, {
+            nome:         row.nome_cliente,
+            cliente:      row.nome_cliente,
+            nome_cliente: row.nome_cliente,
+            numped,
+          });
+          const sendResult = await this.wp.send({ to: destino, text: texto, modo: effectiveMode });
+          const enviado = sendResult.status === "ENVIADO";
+
           const { duplicate } = await this.msgLog.log({
             numped,
             codcli:         String(row.codcli),
             eventKey:       "ENTREGA_CONFIRMADA_AGENDAR_MONTAGEM",
             templateId:     template.id,
-            destino:        telefone,
-            status:         "ENVIADO",
+            destino,
+            status:         enviado ? "ENVIADO" : "ERRO",
             modoEnvio:      effectiveMode,
-            idempotencyKey,
+            // Só consome a idempotência em envio bem-sucedido (permite reenvio após erro).
+            idempotencyKey: enviado ? idempotencyKey : undefined,
+            erro:           sendResult.error ?? null,
             payload: {
               nome_cliente: row.nome_cliente,
               data_entrega: row.data_entrega_confirmada,
+              provider:     sendResult.provider,
             },
           });
-          if (!duplicate) {
+          if (enviado && !duplicate) {
             await this._marcarConviteEnviado(numped, new Date());
             result.convitesEnviados++;
+          } else if (!enviado) {
+            result.erros.push({ numped, message: sendResult.error ?? "Falha no envio" });
           } else {
             result.ignorados.push({ numped, motivo: "IGNORADO_DUPLICIDADE" });
           }

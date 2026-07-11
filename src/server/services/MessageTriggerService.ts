@@ -224,6 +224,9 @@ export class MessageTriggerService {
     const sendResult = await this.wp.send({ to: destPhone, text: renderedText, modo: effectiveMode });
 
     const logStatus = sendResult.status === "ENVIADO" ? "ENVIADO" : "ERRO";
+    // A chave de idempotência só é consumida em ENVIO com sucesso. Um ERRO (falha
+    // transitória do provider) registra o log SEM a chave, para que a próxima
+    // sincronização possa reenviar — senão a mensagem ficaria bloqueada para sempre.
     const { id: logId, duplicate } = await this.logs.log({
       numped:         event.numped,
       codcli:         event.codcli,
@@ -231,7 +234,7 @@ export class MessageTriggerService {
       templateId:     template.id,
       destino:        destPhone,
       status:         logStatus,
-      idempotencyKey,
+      idempotencyKey: logStatus === "ENVIADO" ? idempotencyKey : undefined,
       modoEnvio:      effectiveMode,
       erro:           sendResult.error ?? null,
       payload:        {

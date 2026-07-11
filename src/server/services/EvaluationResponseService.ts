@@ -137,6 +137,7 @@ export class EvaluationResponseService {
 
     // SAC trigger on negative classification — requires order in MONT_ORDERS
     if (classification === "NEGATIVA" && montOrder) {
+      // Abre o SAC. Falha aqui não deve impedir o bloqueio de pagamento abaixo.
       try {
         const sacResult = await this.sacService.open(
           montOrder.id,
@@ -148,14 +149,23 @@ export class EvaluationResponseService {
         );
         sacCaseId = sacResult?.id;
         sacTriggered = true;
+      } catch (err) {
+        console.error(`[EvaluationResponse] Falha ao abrir SAC para pedido ${montOrder.id}:`, (err as Error).message);
+      }
 
+      // Persiste o vínculo do SAC (não-crítico e isolado — coluna pode não existir em bases antigas).
+      try {
         await execDml(
-          "UPDATE MONT_EVAL_RESPONSES SET SAC_TRIGGERED = 1, SAC_CASE_ID = :sacId WHERE ID = :id",
-          { sacId: sacCaseId ?? null, id: responseId },
+          "UPDATE MONT_EVAL_RESPONSES SET SAC_TRIGGERED = :trig, SAC_CASE_ID = :sacId WHERE ID = :id",
+          { trig: sacTriggered ? 1 : 0, sacId: sacCaseId ?? null, id: responseId },
         );
+      } catch (err) {
+        console.error(`[EvaluationResponse] Falha ao gravar SAC_CASE_ID (resposta ${responseId}):`, (err as Error).message);
+      }
 
-        // Block assembler payment if montagem phase
-        if (linkInfo.phase === "MONTAGEM") {
+      // Bloqueio de pagamento em fase de montagem — CRÍTICO, roda independente do SAC.
+      if (linkInfo.phase === "MONTAGEM") {
+        try {
           await execDml(
             `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'BLOQUEADO', BLOCKED_REASON = :reason, UPDATED_AT = SYSTIMESTAMP
              WHERE ASSEMBLY_JOB_ID IN (
@@ -168,9 +178,9 @@ export class EvaluationResponseService {
             "UPDATE MONT_EVAL_RESPONSES SET PAYMENT_IMPACT = 'BLOQUEADO' WHERE ID = :id",
             { id: responseId },
           );
+        } catch (err) {
+          console.error(`[EvaluationResponse] Falha ao bloquear pagamento do pedido ${montOrder.id}:`, (err as Error).message);
         }
-      } catch {
-        // SAC failure doesn't block evaluation recording
       }
     }
 

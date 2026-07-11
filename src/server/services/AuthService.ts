@@ -24,8 +24,9 @@ export class AuthService {
       email: string;
       password_hash: string;
       status: string;
+      token_version: number;
     }>(
-      "SELECT ID, NAME, EMAIL, PASSWORD_HASH, STATUS FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)",
+      "SELECT ID, NAME, EMAIL, PASSWORD_HASH, STATUS, NVL(TOKEN_VERSION, 0) AS TOKEN_VERSION FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)",
       { email },
     );
     if (!user) throw new UnauthorizedError("Credenciais inválidas.");
@@ -61,6 +62,7 @@ export class AuthService {
       name: user.name,
       email: user.email,
       roles: roleNames,
+      tokenVersion: Number(user.token_version ?? 0),
       exp: Math.floor(Date.now() / 1000) + config.jwtExpiresHours * 3600,
     });
 

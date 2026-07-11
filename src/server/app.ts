@@ -26,6 +26,14 @@ declare global {
   }
 }
 
+// Mascara tokens que aparecem no path de rotas públicas, para não vazá-los nos logs.
+function redactUrl(url: string): string {
+  return url.replace(
+    /\/(public\/(?:journey|eval|slots|schedule|sac|reviews)|orders\/[^/]+\/public-token)\/[^/?]+/g,
+    (_m, prefix) => `/${prefix}/***`,
+  );
+}
+
 const DEV_TUNNEL_PATTERNS = [
   /\.ngrok-free\.app$/,
   /\.ngrok-free\.dev$/,
@@ -63,7 +71,7 @@ export function createApp(): express.Express {
     res.on("finish", () => {
       const ms = Date.now() - start;
       const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
-      logger[level]({ requestId, method: req.method, url: req.url, status: res.statusCode, ms }, "http");
+      logger[level]({ requestId, method: req.method, url: redactUrl(req.url), status: res.statusCode, ms }, "http");
     });
     next();
   });

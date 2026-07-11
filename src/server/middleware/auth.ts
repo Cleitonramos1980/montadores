@@ -7,6 +7,7 @@ export interface JwtPayload {
   name: string;
   email: string;
   roles: string[];
+  tokenVersion?: number;
   exp: number;
   iat: number;
 }
@@ -49,18 +50,67 @@ export function verifyJwt(token: string): JwtPayload {
   return payload;
 }
 
+// Cache curto de STATUS + TOKEN_VERSION por usuário, para não consultar o banco
+// a cada requisição. Revogação (desativar usuário / trocar senha) reflete em até TTL.
+const REVOCATION_TTL_MS = 30_000;
+const revocationCache = new Map<string, { status: string; version: number; expiresAt: number }>();
+
+/**
+ * Confere se o token ainda é válido contra o estado atual do usuário.
+ * Rejeita se o usuário está inativo ou se TOKEN_VERSION avançou (senha trocada).
+ * Fail-open em erro de banco: uma indisponibilidade do Oracle não deve trancar
+ * todos os usuários — a janela de exposição é limitada pela expiração do token.
+ */
+async function isTokenRevoked(payload: JwtPayload): Promise<boolean> {
+  if (typeof payload.tokenVersion !== "number") return false; // token legado — sem checagem
+  const now = Date.now();
+  let entry = revocationCache.get(payload.sub);
+  if (!entry || entry.expiresAt < now) {
+    try {
+      const { queryOne } = await import("../db/db");
+      const row = await queryOne<{ status: string; token_version: number }>(
+        "SELECT STATUS, NVL(TOKEN_VERSION, 0) AS TOKEN_VERSION FROM MONT_USERS WHERE ID = :id",
+        { id: payload.sub },
+      );
+      if (!row) return false; // não confirmável — fail-open
+      entry = { status: row.status, version: Number(row.token_version ?? 0), expiresAt: now + REVOCATION_TTL_MS };
+      revocationCache.set(payload.sub, entry);
+    } catch {
+      return false; // banco indisponível — fail-open
+    }
+  }
+  if (entry.status !== "ATIVO") return true;
+  if (entry.version !== payload.tokenVersion) return true;
+  return false;
+}
+
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     res.status(401).json({ error: "Autenticação obrigatória." });
     return;
   }
+  let payload: JwtPayload;
   try {
-    req.user = verifyJwt(authHeader.slice(7));
-    next();
+    payload = verifyJwt(authHeader.slice(7));
   } catch (err) {
     res.status(401).json({ error: (err as Error).message });
+    return;
   }
+  isTokenRevoked(payload)
+    .then((revoked) => {
+      if (revoked) {
+        res.status(401).json({ error: "Sessão revogada. Faça login novamente." });
+        return;
+      }
+      req.user = payload;
+      next();
+    })
+    .catch(() => {
+      // Qualquer falha inesperada na checagem não deve derrubar a requisição
+      req.user = payload;
+      next();
+    });
 }
 
 export function requireRole(...roles: string[]) {
