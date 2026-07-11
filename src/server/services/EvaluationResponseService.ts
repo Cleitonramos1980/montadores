@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { AppError } from "../errors";
-import { execDml, queryOne, queryRows } from "../db/db";
+import { execDml, queryOne, queryRows, withTransaction } from "../db/db";
 import { EvaluationLinkService } from "./EvaluationLinkService";
 import { SacService } from "./SacService";
 import { WinthorSyncService } from "./WinthorSyncService";
@@ -87,46 +87,48 @@ export class EvaluationResponseService {
     }
 
     const responseId = uuid();
-    await execDml(
-      `INSERT INTO MONT_EVAL_RESPONSES
-         (ID, LINK_ID, CONFIG_ID, ORDER_ID, ASSEMBLY_JOB_ID, NUMPED, CODCLI, PHASE,
-          SCORE, CLASSIFICATION, EVAL_COMMENT, SAC_TRIGGERED, PAYMENT_IMPACT, IP, USER_AGENT)
-       VALUES
-         (:id, :linkId, :configId, :orderId, :assemblyJobId, :numped, :codcli, :phase,
-          :score, :classification, :evalComment, :sacTriggered, :paymentImpact, :ip, :userAgent)`,
-      {
-        id: responseId,
-        linkId: linkInfo.linkId,
-        configId: linkInfo.configId,
-        orderId: montOrder?.id ?? null,
-        assemblyJobId: null,
-        numped: linkInfo.numped ?? null,
-        codcli: montOrder?.codcli ?? null,
-        phase: linkInfo.phase,
-        score,
-        classification,
-        evalComment: submission.comment ?? null,
-        sacTriggered: 0,
-        paymentImpact: null,
-        ip: submission.ip ?? null,
-        userAgent: submission.userAgent ?? null,
-      },
-    );
-
-    // Store per-question answers
-    for (const answer of submission.answers) {
-      await execDml(
-        `INSERT INTO MONT_EVAL_ANSWERS (ID, RESPONSE_ID, QUESTION_ID, VALUE_TEXT, VALUE_NUMBER)
-         VALUES (:id, :responseId, :questionId, :valueText, :valueNumber)`,
+    // Atômico: a resposta e todas as respostas de perguntas gravam juntas ou nada,
+    // evitando uma resposta órfã sem answers se falhar no meio do loop.
+    await withTransaction(async (tx) => {
+      await tx.exec(
+        `INSERT INTO MONT_EVAL_RESPONSES
+           (ID, LINK_ID, CONFIG_ID, ORDER_ID, ASSEMBLY_JOB_ID, NUMPED, CODCLI, PHASE,
+            SCORE, CLASSIFICATION, EVAL_COMMENT, SAC_TRIGGERED, PAYMENT_IMPACT, IP, USER_AGENT)
+         VALUES
+           (:id, :linkId, :configId, :orderId, :assemblyJobId, :numped, :codcli, :phase,
+            :score, :classification, :evalComment, :sacTriggered, :paymentImpact, :ip, :userAgent)`,
         {
-          id: uuid(),
-          responseId,
-          questionId: answer.questionId,
-          valueText: answer.valueText ?? null,
-          valueNumber: answer.valueNumber ?? null,
+          id: responseId,
+          linkId: linkInfo.linkId,
+          configId: linkInfo.configId,
+          orderId: montOrder?.id ?? null,
+          assemblyJobId: null,
+          numped: linkInfo.numped ?? null,
+          codcli: montOrder?.codcli ?? null,
+          phase: linkInfo.phase,
+          score,
+          classification,
+          evalComment: submission.comment ?? null,
+          sacTriggered: 0,
+          paymentImpact: null,
+          ip: submission.ip ?? null,
+          userAgent: submission.userAgent ?? null,
         },
       );
-    }
+      for (const answer of submission.answers) {
+        await tx.exec(
+          `INSERT INTO MONT_EVAL_ANSWERS (ID, RESPONSE_ID, QUESTION_ID, VALUE_TEXT, VALUE_NUMBER)
+           VALUES (:id, :responseId, :questionId, :valueText, :valueNumber)`,
+          {
+            id: uuid(),
+            responseId,
+            questionId: answer.questionId,
+            valueText: answer.valueText ?? null,
+            valueNumber: answer.valueNumber ?? null,
+          },
+        );
+      }
+    });
 
     // Mark link as used
     await this.links.markUsed(linkInfo.linkId);

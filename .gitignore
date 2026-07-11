@@ -11,3 +11,6 @@ drafts/
 # Logs e arquivos de runtime
 *.log
 uploads/
+
+# Backups (contêm dados pessoais — LGPD)
+backups/

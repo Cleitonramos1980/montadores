@@ -104,30 +104,43 @@ export class EventService {
     if (existing) return existing.id;
 
     const id = uuid();
-    await execDml(
-      `INSERT INTO MONT_ORDER_EVENTS
-       (ID, TYPE, NUMPED, CODCLI, ASSEMBLY_ID, PROVIDER_ID, PAYMENT_ID, PREVIOUS_STATUS, NEW_STATUS, ORIGIN,
-        METADATA_JSON, USER_ID, IP, USER_AGENT, IDEMPOTENCY_KEY)
-       VALUES (:id, :type, :numped, :codcli, :assemblyId, :providerId, :paymentId, :previousStatus, :newStatus, :origin,
-               :metadataJson, :userId, :ip, :userAgent, :idempotencyKey)`,
-      {
-        id,
-        type: input.type,
-        numped: input.numped,
-        codcli: input.codcli ?? null,
-        assemblyId: input.assemblyId ?? null,
-        providerId: input.providerId ?? null,
-        paymentId: input.paymentId ?? null,
-        previousStatus: input.previousStatus ?? null,
-        newStatus: input.newStatus ?? null,
-        origin: input.origin,
-        metadataJson: json(input.metadata ?? {}),
-        userId: input.userId ?? null,
-        ip: input.ip ?? null,
-        userAgent: input.userAgent ?? null,
-        idempotencyKey: input.idempotencyKey,
-      },
-    );
+    try {
+      await execDml(
+        `INSERT INTO MONT_ORDER_EVENTS
+         (ID, TYPE, NUMPED, CODCLI, ASSEMBLY_ID, PROVIDER_ID, PAYMENT_ID, PREVIOUS_STATUS, NEW_STATUS, ORIGIN,
+          METADATA_JSON, USER_ID, IP, USER_AGENT, IDEMPOTENCY_KEY)
+         VALUES (:id, :type, :numped, :codcli, :assemblyId, :providerId, :paymentId, :previousStatus, :newStatus, :origin,
+                 :metadataJson, :userId, :ip, :userAgent, :idempotencyKey)`,
+        {
+          id,
+          type: input.type,
+          numped: input.numped,
+          codcli: input.codcli ?? null,
+          assemblyId: input.assemblyId ?? null,
+          providerId: input.providerId ?? null,
+          paymentId: input.paymentId ?? null,
+          previousStatus: input.previousStatus ?? null,
+          newStatus: input.newStatus ?? null,
+          origin: input.origin,
+          metadataJson: json(input.metadata ?? {}),
+          userId: input.userId ?? null,
+          ip: input.ip ?? null,
+          userAgent: input.userAgent ?? null,
+          idempotencyKey: input.idempotencyKey,
+        },
+      );
+    } catch (err) {
+      // Corrida: outro processo inseriu a mesma IDEMPOTENCY_KEY entre o SELECT e o
+      // INSERT (ORA-00001). Trata como duplicata graciosamente, devolvendo o id existente.
+      if ((err as { errorNum?: number })?.errorNum === 1) {
+        const dup = await queryOne<{ id: string }>(
+          "SELECT ID FROM MONT_ORDER_EVENTS WHERE IDEMPOTENCY_KEY = :key",
+          { key: input.idempotencyKey },
+        );
+        if (dup) return dup.id;
+      }
+      throw err;
+    }
 
     if (input.orderId) {
       await execDml(

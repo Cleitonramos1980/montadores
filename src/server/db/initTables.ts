@@ -856,6 +856,23 @@ const INDEXES: IndexDef[] = [
   { name: "IDX_MONT_JOBITEMS_JOB",    table: "MONT_ASSEMBLY_JOB_ITEMS",     columns: "ASSEMBLY_JOB_ID" },
   // CC-07: garantir pagamento único por montagem (evita duplicatas)
   { name: "UQ_MONT_PAY_ASSEMBLY_JOB", table: "MONT_PROVIDER_PAYMENTS", columns: "ASSEMBLY_JOB_ID", unique: true },
+  // Índices de FK/filtros frequentes (evitam full scan nas junções mais comuns)
+  { name: "IDX_MONT_JOBS_ORDER",      table: "MONT_ASSEMBLY_JOBS",   columns: "ORDER_ID" },
+  { name: "IDX_MONT_JOBS_STATUS",     table: "MONT_ASSEMBLY_JOBS",   columns: "STATUS" },
+  { name: "IDX_MONT_JOBS_PROVIDER",   table: "MONT_ASSEMBLY_JOBS",   columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_OITEMS_ORDER",    table: "MONT_ORDER_ITEMS",     columns: "ORDER_ID" },
+  { name: "IDX_MONT_SAC_ORDER",       table: "MONT_SAC_CASES",       columns: "ORDER_ID" },
+  { name: "IDX_MONT_SAC_STATUS",      table: "MONT_SAC_CASES",       columns: "STATUS" },
+  { name: "IDX_MONT_SAC_JOB",         table: "MONT_SAC_CASES",       columns: "ASSEMBLY_JOB_ID" },
+  // Tabelas recém-adicionadas ao schema
+  { name: "IDX_MONT_REWORKS_JOB",     table: "MONT_ASSEMBLY_REWORKS",       columns: "ASSEMBLY_JOB_ID" },
+  { name: "IDX_MONT_REWORKS_PROV",    table: "MONT_ASSEMBLY_REWORKS",       columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_CERTS_PROV",      table: "MONT_PROVIDER_CERTIFICATIONS", columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_UNAVAIL_PROV",    table: "MONT_PROVIDER_UNAVAILABILITY", columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_PAYACC_PROV",     table: "MONT_PROVIDER_PAYMENT_ACCOUNTS", columns: "PROVIDER_ID" },
+  { name: "IDX_MONT_CCITEMS_PAY",     table: "MONT_COMMISSION_CALC_ITEMS",  columns: "PAYMENT_ID" },
+  { name: "IDX_MONT_PIXREQ_PMT",      table: "MONT_PIX_PAYMENT_REQUESTS",   columns: "PROVIDER_PAYMENT_ID" },
+  { name: "IDX_MONT_JOBQ_STATUS_RUN", table: "MONT_JOB_QUEUE",              columns: "STATUS, NEXT_RUN_AT" },
 ];
 
 async function tableExists(tableName: string): Promise<boolean> {

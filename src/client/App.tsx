@@ -18,9 +18,14 @@ import { ProviderNewPage } from "./pages/ProviderNewPage";
 import { ProviderRegistrationPage } from "./pages/ProviderRegistrationPage";
 import { ProvidersPage } from "./pages/ProvidersPage";
 import { PublicReviewPage } from "./pages/PublicReviewPage";
+import { PublicEvaluationPage } from "./pages/PublicEvaluationPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
 import { SacPage } from "./pages/SacPage";
 import { SchedulePage } from "./pages/SchedulePage";
+import { UsersPage } from "./pages/UsersPage";
+import { SystemHealthPage } from "./pages/SystemHealthPage";
+import { EvaluationConfigPage } from "./pages/EvaluationConfigPage";
+import { ProviderProfilePage } from "./pages/ProviderProfilePage";
 import { getToken } from "./lib/api";
 
 export function App() {
@@ -29,6 +34,7 @@ export function App() {
   // Public routes — no auth required, no layout
   if (path.startsWith("/montadores/jornada-publica/")) return <CustomerJourneyPage token={path.split("/").pop()!} />;
   if (path.startsWith("/montadores/avaliacao/")) return <PublicReviewPage token={path.split("/").pop()!} />;
+  if (path.startsWith("/montadores/eval/")) return <PublicEvaluationPage token={path.split("/").pop()!} />;
   if (path === "/montadores/cadastro") return <ProviderRegistrationPage />;
   if (path === "/montadores/login") return <LoginPage />;
 
@@ -51,6 +57,8 @@ export function App() {
   if (path === "/montadores/agenda") page = <SchedulePage />;
   if (path === "/montadores/prestadores") page = <ProvidersPage />;
   if (path === "/montadores/prestadores/novo") page = <ProviderNewPage />;
+  // :id precisa vir DEPOIS de /novo (senão "novo" seria capturado como id)
+  else if (path.startsWith("/montadores/prestadores/")) page = <ProviderProfilePage id={path.split("/").pop()!} />;
   if (path === "/montadores/aprovacao") page = <ApprovalPage />;
   if (path === "/montadores/sac") page = <SacPage />;
   if (path === "/montadores/financeiro") page = <FinancePage />;
@@ -63,6 +71,9 @@ export function App() {
   if (path === "/montadores/app") page = <ProviderAppPage />;
   if (path === "/montadores/app/minhas-montagens") page = <MontadorMinhasMontagens />;
   if (path === "/montadores/auditoria") page = <AuditPage />;
+  if (path === "/montadores/usuarios") page = <UsersPage />;
+  if (path === "/montadores/saude") page = <SystemHealthPage />;
+  if (path === "/montadores/avaliacoes-config") page = <EvaluationConfigPage />;
 
   return <Layout>{page}</Layout>;
 }

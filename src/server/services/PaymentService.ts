@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { AppError } from "../errors";
-import { execDml, queryOne, queryRows } from "../db/db";
+import { execDml, queryOne, queryRows, withTransaction } from "../db/db";
 import { AuditService } from "./AuditService";
 import { EventService } from "./EventService";
 
@@ -119,20 +119,22 @@ export class PaymentService {
       throw new Error("Somente pagamentos programados ou liberados podem ser marcados como pagos.");
     }
 
-    await execDml(
-      "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'PAGO', PAID_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: paymentId },
-    );
-
-    await execDml(
-      "INSERT INTO MONT_PAYMENT_APPROVAL_LOGS (ID, PAYMENT_ID, ACTION, USER_ID) VALUES (:logId, :paymentId, 'PAGO', :userId)",
-      { logId: uuid(), paymentId, userId: userId ?? null },
-    );
-
-    await execDml(
-      "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'CONCLUIDO', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
-      { id: payment.order_id },
-    );
+    // Atômico: marcar PAGO + registrar log + concluir pedido são tudo-ou-nada.
+    // Se qualquer passo falhar, nada é commitado (evita pagamento "meio-feito").
+    await withTransaction(async (tx) => {
+      await tx.exec(
+        "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'PAGO', PAID_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+        { id: paymentId },
+      );
+      await tx.exec(
+        "INSERT INTO MONT_PAYMENT_APPROVAL_LOGS (ID, PAYMENT_ID, ACTION, USER_ID) VALUES (:logId, :paymentId, 'PAGO', :userId)",
+        { logId: uuid(), paymentId, userId: userId ?? null },
+      );
+      await tx.exec(
+        "UPDATE MONT_ORDERS SET CURRENT_STATUS = 'CONCLUIDO', UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+        { id: payment.order_id },
+      );
+    });
 
     await this.events.emit({
       type: "PAGAMENTO_REALIZADO",

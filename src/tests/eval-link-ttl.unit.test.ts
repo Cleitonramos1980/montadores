@@ -5,6 +5,10 @@ vi.mock("../server/db/db", () => ({
   queryOne:  vi.fn().mockResolvedValue(null),
   execDml:   vi.fn().mockResolvedValue(undefined),
   queryRows: vi.fn().mockResolvedValue([]),
+  // withTransaction executa o callback imediatamente com um tx no-op (as escritas
+  // já são cobertas pelos mocks de execDml/queryOne).
+  withTransaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+    fn({ exec: vi.fn().mockResolvedValue(undefined), queryOne: vi.fn().mockResolvedValue(null) })),
 }));
 
 // Monta um EvalLinkInfo completo com os campos que EvaluationResponseService usa

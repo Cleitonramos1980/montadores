@@ -1,4 +1,4 @@
-import { BadgeDollarSign, CalendarDays, ClipboardList, Gauge, GitBranch, Hammer, Headphones, History, Landmark, LogOut, MessageSquareText, PlugZap, Shield, Smartphone, Star, Users } from "lucide-react";
+import { BadgeDollarSign, CalendarDays, ClipboardList, Gauge, GitBranch, Hammer, Headphones, HeartPulse, History, Landmark, ListChecks, LogOut, MessageSquareText, PlugZap, Shield, Smartphone, Star, UserCog, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { clearToken, getStoredUser } from "../lib/api";
 
@@ -16,8 +16,11 @@ const nav = [
   ["Avaliações", "/montadores/avaliacoes", Star],
   ["Fluxo Mensagens", "/montadores/mensagens", MessageSquareText],
   ["Régua", "/montadores/regua-fluxo", GitBranch],
+  ["Config Avaliações", "/montadores/avaliacoes-config", ListChecks],
   ["WinThor", "/montadores/integracao-winthor", PlugZap],
+  ["Usuários", "/montadores/usuarios", UserCog],
   ["Auditoria", "/montadores/auditoria", Shield],
+  ["Saúde do Sistema", "/montadores/saude", HeartPulse],
 ] as const;
 
 function logout() {

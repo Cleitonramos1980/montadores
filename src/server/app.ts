@@ -9,6 +9,7 @@ import { config } from "./config";
 import { AppError } from "./errors";
 import { logger } from "./logger";
 import { buildOpenApiSpec } from "./openapi";
+import { verifySignedFile } from "./middleware/signedFile";
 import { api } from "./routes/api";
 import { fluxo } from "./routes/fluxo";
 import { providersRouter } from "./routes/providers";
@@ -16,6 +17,7 @@ import { evaluationsRouter } from "./routes/evaluations";
 import { paymentsRouter } from "./routes/payments";
 import { assemblyRouter } from "./routes/assembly";
 import { usersRouter } from "./routes/users";
+import { lgpdRouter } from "./routes/lgpd";
 
 // Augment Express Request with requestId for use in handlers and error logging
 declare global {
@@ -114,9 +116,11 @@ export function createApp(): express.Express {
   }
 
   // ── Static uploads ─────────────────────────────────────────────────────────
+  // Protegido por URL assinada (HMAC+expiração) — antes era servido publicamente
+  // via túnel. Gere o link com signFilePath ao devolver a URL de um arquivo.
   const uploadsDir = join(process.cwd(), "uploads");
   mkdirSync(uploadsDir, { recursive: true });
-  app.use("/api/uploads", express.static(uploadsDir));
+  app.use("/api/uploads", verifySignedFile, express.static(uploadsDir));
 
   // ── Body parsing — rawBody captured for HMAC webhook validation ────────────
   app.use(
@@ -142,6 +146,7 @@ export function createApp(): express.Express {
   app.use("/api", paymentsRouter);
   app.use("/api", assemblyRouter);
   app.use("/api", usersRouter);
+  app.use("/api", lgpdRouter);
 
   // ── Error handler ──────────────────────────────────────────────────────────
   app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {

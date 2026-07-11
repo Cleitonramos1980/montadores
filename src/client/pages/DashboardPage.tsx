@@ -119,8 +119,7 @@ function DrillPanel({
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.numped} style={{ cursor: "pointer" }}
-                    onClick={() => { location.href = `/montadores/fluxo/pedido/${r.numped}`; }}>
+                  <tr key={r.numped}>
                     <td><strong>{r.numped}</strong></td>
                     <td style={{ fontSize: 13 }}>{r.nome_cliente}</td>
                     <td style={{ fontSize: 12 }}>{r.codfilial}</td>

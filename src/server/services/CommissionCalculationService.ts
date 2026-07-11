@@ -162,8 +162,13 @@ export class CommissionCalculationService {
       );
     }
 
-    // Update payment AMOUNT only when we had real PCPEDI data and found items with commission
-    if (dataSource === "winthor_pcpedi" && calcItems.length > 0) {
+    // Atualiza o AMOUNT apenas quando houve dados reais do PCPEDI E ao menos uma
+    // regra de comissão foi efetivamente aplicada. Se nenhum item casou regra
+    // (totalCommission == 0 por ausência de regra), preserva o valor anterior em
+    // vez de zerar silenciosamente um pagamento válido.
+    const regrasAplicadas = calcItems.filter((i) => i.rule_id != null && Number(i.commission_amount) > 0).length;
+    const amountUpdated = dataSource === "winthor_pcpedi" && regrasAplicadas > 0;
+    if (amountUpdated) {
       await execDml(
         "UPDATE MONT_PROVIDER_PAYMENTS SET AMOUNT = :amount, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
         { amount: totalCommission, id: paymentId },
@@ -176,7 +181,7 @@ export class CommissionCalculationService {
       entityType:  "provider_payment",
       entityId:    paymentId,
       previous:    { amount: payment.amount },
-      next:        { amount: totalCommission, dataSource, items: calcItems.length },
+      next:        { amount: amountUpdated ? totalCommission : payment.amount, amountUpdated, dataSource, items: calcItems.length, regrasAplicadas },
     });
 
     const itemsCalculated = calcItems.filter((i) => i.commission_amount > 0).length;

@@ -3,21 +3,55 @@ export type GateResult = {
   reason?: string;
 };
 
-// Feriados nacionais brasileiros fixos e móveis 2025–2027
-const FERIADOS = new Set([
-  // 2025
-  "2025-01-01", "2025-04-18", "2025-04-21", "2025-05-01",
-  "2025-06-19", "2025-09-07", "2025-10-12", "2025-11-02",
-  "2025-11-15", "2025-12-25",
-  // 2026
-  "2026-01-01", "2026-04-03", "2026-04-21", "2026-05-01",
-  "2026-06-04", "2026-09-07", "2026-10-12", "2026-11-02",
-  "2026-11-15", "2026-12-25",
-  // 2027
-  "2027-01-01", "2027-03-26", "2027-04-21", "2027-05-01",
-  "2027-05-27", "2027-09-07", "2027-10-12", "2027-11-02",
-  "2027-11-15", "2027-12-25",
-]);
+// Feriados nacionais brasileiros calculados por ano (não expira).
+// Fixos + móveis derivados da Páscoa (Sexta-feira Santa, Corpus Christi).
+const pad = (n: number) => String(n).padStart(2, "0");
+
+// Domingo de Páscoa (algoritmo de Meeus/Butcher) para um dado ano.
+function easterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3=março, 4=abril
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function offsetDate(base: Date, days: number): string {
+  const d = new Date(base.getTime() + days * 86_400_000);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+const feriadosCache = new Map<number, Set<string>>();
+function feriadosDoAno(year: number): Set<string> {
+  let set = feriadosCache.get(year);
+  if (set) return set;
+  const easter = easterSunday(year);
+  set = new Set<string>([
+    `${year}-01-01`, // Confraternização
+    `${year}-04-21`, // Tiradentes
+    `${year}-05-01`, // Dia do Trabalho
+    `${year}-09-07`, // Independência
+    `${year}-10-12`, // Nossa Senhora Aparecida
+    `${year}-11-02`, // Finados
+    `${year}-11-15`, // Proclamação da República
+    `${year}-11-20`, // Consciência Negra (nacional desde 2024)
+    `${year}-12-25`, // Natal
+    offsetDate(easter, -2), // Sexta-feira Santa
+    offsetDate(easter, 60), // Corpus Christi
+  ]);
+  feriadosCache.set(year, set);
+  return set;
+}
 
 export class DispatchGateService {
   check(params: {
@@ -40,7 +74,7 @@ export class DispatchGateService {
     if (dow === 0 || dow === 6) {
       return { allowed: false, reason: "Fim de semana" };
     }
-    if (FERIADOS.has(dateStr)) {
+    if (feriadosDoAno(brTime.getUTCFullYear()).has(dateStr)) {
       return { allowed: false, reason: `Feriado nacional: ${dateStr}` };
     }
     if (hour < sendHourStart || hour >= sendHourEnd) {

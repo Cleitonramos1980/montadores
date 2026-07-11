@@ -176,7 +176,7 @@ export function ProviderNewPage() {
           <button className="ghostButton" onClick={() => { setForm(EMPTY); setSelectedWinthor(null); setDone(false); }}>
             Cadastrar outro
           </button>
-          <button onClick={() => { location.href = "/montadores/providers"; }}>
+          <button onClick={() => { location.href = "/montadores/prestadores"; }}>
             Ver fornecedores
           </button>
         </div>
@@ -188,7 +188,7 @@ export function ProviderNewPage() {
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "24px 16px" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <button className="ghostButton" onClick={() => { location.href = "/montadores/providers"; }}>
+        <button className="ghostButton" onClick={() => { location.href = "/montadores/prestadores"; }}>
           ← Fornecedores
         </button>
         <h1 style={{ margin: 0, fontSize: 22 }}>Novo fornecedor</h1>
@@ -455,7 +455,7 @@ export function ProviderNewPage() {
           <button
             type="button"
             className="ghostButton"
-            onClick={() => { location.href = "/montadores/providers"; }}
+            onClick={() => { location.href = "/montadores/prestadores"; }}
           >
             Cancelar
           </button>

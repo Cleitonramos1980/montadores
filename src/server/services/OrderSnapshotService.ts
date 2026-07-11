@@ -65,9 +65,13 @@ export class OrderSnapshotService {
          CONDVENDA                 = :condvenda,
          POSICAO                   = :posicao,
          STATUS_PEDIDO             = :statusPedido,
-         FLUXO_STATUS_ANTERIOR     = tgt.FLUXO_STATUS_ATUAL,
+         -- Só desloca o "anterior" quando a fase realmente muda; num sync ocioso
+         -- (fase igual) preserva o histórico da última transição real.
+         FLUXO_STATUS_ANTERIOR     = CASE WHEN tgt.FLUXO_EVENT_KEY_ATUAL <> :fluxoEventKeyAtual
+                                          THEN tgt.FLUXO_STATUS_ATUAL ELSE tgt.FLUXO_STATUS_ANTERIOR END,
          FLUXO_STATUS_ATUAL        = :fluxoStatusAtual,
-         FLUXO_EVENT_KEY_ANTERIOR  = tgt.FLUXO_EVENT_KEY_ATUAL,
+         FLUXO_EVENT_KEY_ANTERIOR  = CASE WHEN tgt.FLUXO_EVENT_KEY_ATUAL <> :fluxoEventKeyAtual
+                                          THEN tgt.FLUXO_EVENT_KEY_ATUAL ELSE tgt.FLUXO_EVENT_KEY_ANTERIOR END,
          FLUXO_EVENT_KEY_ATUAL     = :fluxoEventKeyAtual,
          DATA_DIGITACAO            = :dataDigitacao,
          DATA_EMISSAO_MAPA         = :dataEmissaoMapa,

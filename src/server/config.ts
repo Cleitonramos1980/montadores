@@ -1,3 +1,7 @@
+// Fonte ÚNICA de configuração de runtime do servidor. (O antigo env.ts, um segundo
+// parser Zod não utilizado e com defaults divergentes, foi removido.) Migrações de
+// schema são responsabilidade exclusiva de db/initTables.ts (idempotente no boot);
+// db/migrate.ts permanece apenas como utilitário manual (npm run migrate).
 import dotenv from "dotenv";
 
 dotenv.config();

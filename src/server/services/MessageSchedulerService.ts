@@ -4,6 +4,28 @@ import { PedidoFluxoSyncService } from "./PedidoFluxoSyncService";
 import { EventService } from "./EventService";
 import { AgendaEntregaService } from "./AgendaEntregaService";
 import { JobQueueService } from "./JobQueueService";
+import { WhatsAppProviderService } from "./WhatsAppProviderService";
+import { logger } from "../logger";
+
+/**
+ * Data no fuso de operação (default America/Manaus, UTC-4) em 'YYYY-MM-DD'.
+ * Corrige o bug de usar toISOString() (UTC): à noite em Manaus o UTC já virou o
+ * dia seguinte, fazendo a query buscar o dia errado e a idempotência gravar a
+ * chave do dia errado. offsetDays: 0 = hoje, 1 = amanhã. Fuso via SCHEDULER_TIMEZONE.
+ */
+function localDateStr(offsetDays = 0): string {
+  const tz = process.env.SCHEDULER_TIMEZONE || "America/Manaus";
+  const instant = new Date(Date.now() + offsetDays * 86_400_000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(instant);
+}
+
+function renderTemplate(body: string, vars: Record<string, string | null | undefined>): string {
+  return body
+    .replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? `{{${k}}}`)
+    .replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? `{${k}}`);
+}
 
 export class MessageSchedulerService {
   private intervalId: ReturnType<typeof setInterval> | null = null;
@@ -12,15 +34,16 @@ export class MessageSchedulerService {
   private readonly sync         = new PedidoFluxoSyncService();
   private readonly events       = new EventService();
   private readonly agendaEntrega = new AgendaEntregaService();
+  private readonly wp           = new WhatsAppProviderService();
 
   start(intervalMs = 15 * 60 * 1_000): void {
     if (this.intervalId) return;
-    console.log(`[Scheduler] Iniciado — ciclo a cada ${intervalMs / 60_000} min`);
+    logger.info(`[Scheduler] Iniciado — ciclo a cada ${intervalMs / 60_000} min`);
     this._resetStuckRuns()
       .then(() => this.runCycle())
-      .catch((e) => console.error("[Scheduler] Erro no ciclo inicial:", e));
+      .catch((e) => logger.error({ err: e }, "[Scheduler] Erro no ciclo inicial:"));
     this.intervalId = setInterval(() => {
-      this.runCycle().catch((e) => console.error("[Scheduler] Erro no ciclo:", e));
+      this.runCycle().catch((e) => logger.error({ err: e }, "[Scheduler] Erro no ciclo:"));
     }, intervalMs);
   }
 
@@ -30,7 +53,7 @@ export class MessageSchedulerService {
         "UPDATE MONT_SYNC_RUNS SET RUN_STATUS = 'ERRO', FINALIZADO_EM = SYSTIMESTAMP WHERE RUN_STATUS = 'RUNNING'",
       );
     } catch (e) {
-      console.warn("[Scheduler] Aviso: não foi possível limpar runs presas:", (e as Error).message);
+      logger.warn({ err: (e as Error).message }, "[Scheduler] Aviso: não foi possível limpar runs presas:");
     }
   }
 
@@ -38,13 +61,13 @@ export class MessageSchedulerService {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log("[Scheduler] Parado");
+      logger.info("[Scheduler] Parado");
     }
   }
 
   async runCycle(): Promise<void> {
     if (this.running) {
-      console.warn("[Scheduler] Ciclo anterior ainda em execução — pulando");
+      logger.warn("[Scheduler] Ciclo anterior ainda em execução — pulando");
       return;
     }
     this.running = true;
@@ -54,7 +77,7 @@ export class MessageSchedulerService {
       await this._sendReminders();
       await this._runLembreteAgendarMontagem();
       await JobQueueService.processPending(20).catch((e) =>
-        console.error("[Scheduler] Erro ao processar job queue:", (e as Error).message),
+        logger.error({ err: (e as Error).message }, "[Scheduler] Erro ao processar job queue:"),
       );
     } finally {
       this.running = false;
@@ -78,13 +101,13 @@ export class MessageSchedulerService {
       const daysBack = Number(daysBackRow?.config_value ?? 7);
 
       const result = await this.agendaEntrega.sync({ modo: syncMode, daysBack });
-      console.log(
+      logger.info(
         `[Scheduler] AgendaEntrega sync — encontrados=${result.totalEncontrados} ` +
         `enviados=${result.convitesEnviados} simulados=${result.convitesSimulados} ` +
         `ignorados=${result.ignorados.length}`,
       );
     } catch (err) {
-      console.error("[Scheduler] Erro no AgendaEntrega sync:", (err as Error).message);
+      logger.error({ err: (err as Error).message }, "[Scheduler] Erro no AgendaEntrega sync:");
     }
   }
 
@@ -119,7 +142,7 @@ export class MessageSchedulerService {
            AND DATA_ENVIO_CONVITE <= SYSDATE - :dias
          FETCH FIRST 100 ROWS ONLY`,
         { dias: DIAS_SEM_AGENDAR },
-      ).catch((e) => { console.error("[Scheduler] Falha ao buscar candidatos de lembrete:", (e as Error).message); return []; });
+      ).catch((e) => { logger.error({ err: (e as Error).message }, "[Scheduler] Falha ao buscar candidatos de lembrete:"); return []; });
 
       if (candidates.length === 0) return;
 
@@ -155,26 +178,43 @@ export class MessageSchedulerService {
             payload: { nome_cliente: row.nome_cliente, data_envio_convite: row.data_envio_convite },
           }).catch(() => null);
           enviados++;
-        } else if (effectiveMode === "HOMOLOGACAO") {
+        } else {
+          // HOMOLOGACAO redireciona ao piloto; PRODUCAO usa o telefone real.
+          const destino = effectiveMode === "HOMOLOGACAO" ? (telefonesTeste ?? null) : (row.telefone ?? null);
+          if (!destino) {
+            await msgLog.log({
+              numped, codcli: String(row.codcli),
+              eventKey: "LEMBRETE_AGENDAR_MONTAGEM",
+              status: "IGNORADO_SEM_TELEFONE", modoEnvio: effectiveMode,
+            }).catch(() => null);
+            continue;
+          }
+          const texto = renderTemplate(template.body, {
+            nome: row.nome_cliente, cliente: row.nome_cliente, nome_cliente: row.nome_cliente, numped,
+          });
+          const sendResult = await this.wp.send({ to: destino, text: texto, modo: effectiveMode });
+          const enviado = sendResult.status === "ENVIADO";
           const { duplicate } = await msgLog.log({
             numped, codcli: String(row.codcli),
             eventKey: "LEMBRETE_AGENDAR_MONTAGEM",
             templateId: template.id,
-            destino: telefonesTeste ?? "SEM_TELEFONE_TESTE",
-            status: "HOMOLOGACAO_ENVIADO_DESTINO_FORCADO",
-            modoEnvio: "HOMOLOGACAO",
-            idempotencyKey,
-            payload: { nome_cliente: row.nome_cliente, data_envio_convite: row.data_envio_convite, destino_original: row.telefone },
+            destino,
+            status: enviado ? "ENVIADO" : "ERRO",
+            modoEnvio: effectiveMode,
+            // Consome idempotência só em envio bem-sucedido (permite reenvio após erro).
+            idempotencyKey: enviado ? idempotencyKey : undefined,
+            erro: sendResult.error ?? null,
+            payload: { nome_cliente: row.nome_cliente, destino_original: row.telefone, provider: sendResult.provider },
           });
-          if (!duplicate) enviados++;
+          if (enviado && !duplicate) enviados++;
         }
       }
 
       if (enviados > 0 || candidates.length > 0) {
-        console.log(`[Scheduler] LembreteAgendar — candidatos=${candidates.length} lembretes=${enviados}`);
+        logger.info(`[Scheduler] LembreteAgendar — candidatos=${candidates.length} lembretes=${enviados}`);
       }
     } catch (err) {
-      console.error("[Scheduler] Erro no lembrete de agendamento:", (err as Error).message);
+      logger.error({ err: (err as Error).message }, "[Scheduler] Erro no lembrete de agendamento:");
     }
   }
 
@@ -190,21 +230,20 @@ export class MessageSchedulerService {
         "DRY_RUN"
       ) as "DRY_RUN" | "PRODUCAO" | "HOMOLOGACAO";
       const result = await this.sync.run({ modo: syncMode });
-      console.log(
+      logger.info(
         `[Scheduler] Sync concluído — pedidos=${result.pedidosEncontrados} ` +
         `eventos=${result.eventosGerados} msgs=${result.msgsEnviadas}/${result.msgsSimuladas}`,
       );
     } catch (err) {
-      console.error("[Scheduler] Erro no sync:", (err as Error).message);
+      logger.error({ err: (err as Error).message }, "[Scheduler] Erro no sync:");
     }
   }
 
   private async _sendReminders(): Promise<void> {
-    // Tomorrow in 'YYYY-MM-DD' format (Oracle string date)
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-    const todayStr = new Date().toISOString().slice(0, 10);
+    // Datas no fuso de operação (America/Manaus, UTC-4), NÃO em UTC — senão à noite
+    // o "amanhã"/"hoje" saem um dia à frente e a idempotência trava o dia certo.
+    const tomorrowStr = localDateStr(1);
+    const todayStr    = localDateStr(0);
 
     // LEMBRETE_MONTAGEM_CLIENTE: assemblies scheduled for tomorrow
     try {
@@ -223,13 +262,13 @@ export class MessageSchedulerService {
           origin:         "JOB",
           idempotencyKey: `lembrete-montagem:${r.numped}:${tomorrowStr}`,
           metadata:       { scheduleId: r.schedule_id, scheduledDate: tomorrowStr },
-        }).catch((e) => console.error(`[Scheduler] Erro lembrete ${r.numped}:`, (e as Error).message));
+        }).catch((e) => logger.error({ err: (e as Error).message }, `[Scheduler] Erro lembrete ${r.numped}:`));
       }
       if (reminders.length > 0) {
-        console.log(`[Scheduler] ${reminders.length} lembretes de montagem emitidos para ${tomorrowStr}`);
+        logger.info(`[Scheduler] ${reminders.length} lembretes de montagem emitidos para ${tomorrowStr}`);
       }
     } catch (err) {
-      console.error("[Scheduler] Erro ao consultar lembretes:", (err as Error).message);
+      logger.error({ err: (err as Error).message }, "[Scheduler] Erro ao consultar lembretes:");
     }
 
     // PENDENCIA_FOTOS_MONTADOR: jobs finished today without photos
@@ -252,13 +291,13 @@ export class MessageSchedulerService {
           origin:         "JOB",
           idempotencyKey: `fotos-pendentes:${r.numped}:${todayStr}`,
           metadata:       { jobId: r.job_id, date: todayStr },
-        }).catch((e) => console.error(`[Scheduler] Erro pendência fotos ${r.numped}:`, (e as Error).message));
+        }).catch((e) => logger.error({ err: (e as Error).message }, `[Scheduler] Erro pendência fotos ${r.numped}:`));
       }
       if (pendentes.length > 0) {
-        console.log(`[Scheduler] ${pendentes.length} pendências de fotos emitidas`);
+        logger.info(`[Scheduler] ${pendentes.length} pendências de fotos emitidas`);
       }
     } catch (err) {
-      console.error("[Scheduler] Erro ao consultar pendências de fotos:", (err as Error).message);
+      logger.error({ err: (err as Error).message }, "[Scheduler] Erro ao consultar pendências de fotos:");
     }
   }
 }
