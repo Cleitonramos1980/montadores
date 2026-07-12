@@ -37,6 +37,20 @@ module.exports = {
       log_date_format: "YYYY-MM-DD HH:mm:ss",
     },
     {
+      // Monitor de saúde auto-hospedado (polling de /ready e /system/health).
+      // Alerta por log estruturado + webhook opcional (ALERT_WEBHOOK_URL no .env).
+      name: "montadores-monitor",
+      script: "scripts/health-monitor.cjs",
+      cwd: __dirname,
+      node_args: "--env-file=.env",
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "30s",
+      windowsHide: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
+    {
       name: "montadores-tunnel",
       script: "C:\\Users\\cleit\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Cloudflare.cloudflared_Microsoft.Winget.Source_8wekyb3d8bbwe\\cloudflared.exe",
       args: `--config "C:\\Users\\cleit\\.cloudflared\\config.yml" tunnel run`,
