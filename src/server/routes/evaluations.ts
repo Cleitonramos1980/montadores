@@ -16,10 +16,13 @@ const flow             = new FlowService();
 const evalConfigSvc    = new EvaluationConfigService();
 const evalLinkSvc      = new EvaluationLinkService();
 const evalAdminRoles   = requireRole("ADMIN", "GESTOR");
+// Leitura de templates: espelha o guard "staff" que existia na api.ts, para não
+// regredir a proteção agora que este router resolve a rota primeiro.
+const staffReadRoles   = requireRole("ADMIN", "GESTOR", "OPERACAO", "FINANCEIRO", "LOGISTICA", "SAC");
 
 // ── Message templates ─────────────────────────────────────────────────────────
 
-evaluationsRouter.get("/message-templates", asyncRoute(async (_req, res) =>
+evaluationsRouter.get("/message-templates", staffReadRoles, asyncRoute(async (_req, res) =>
   res.json(await messageTemplates.list())
 ));
 

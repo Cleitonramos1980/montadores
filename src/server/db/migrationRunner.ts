@@ -1,3 +1,13 @@
+// =============================================================================
+// AVISO: NÃO utilizado no boot atual.
+// -----------------------------------------------------------------------------
+// O schema real vive em src/server/db/initTables.ts (ensureMontadoresTables),
+// que é idempotente e é o ÚNICO caminho executado na inicialização do servidor.
+// Este runner de migrações versionadas NÃO é chamado no boot — permanece apenas
+// como infraestrutura de referência e é exercitado por tests/unit/migrationRunner.test.ts.
+// Não presuma que estas migrações rodam automaticamente. Se um dia forem plugadas
+// no boot, coordene com o dono do initTables para evitar dupla criação de schema.
+// =============================================================================
 import { execDml, queryOne, queryRows } from "./db";
 import { executeOracle, isOracleEnabled } from "./oracle";
 import { logger } from "../logger";
@@ -50,6 +60,12 @@ export async function runMigrations(migrations: Migration[]): Promise<void> {
   for (const migration of pending) {
     logger.info({ id: migration.id }, `[migrations] Executando: ${migration.description}`);
     try {
+      // Atomicidade: cada migração é aplicada e registrada de forma independente.
+      // Observação importante do Oracle: DDL (CREATE TABLE/INDEX) faz COMMIT implícito
+      // e NÃO pode ser revertido por rollback, portanto envolver `up()` em withTransaction
+      // não daria atomicidade real para migrações de schema. A garantia contra estado
+      // parcial vem de cada migração ser IDEMPOTENTE (checagem de existência antes de
+      // criar — ver migrations/002_job_queue e initTables): reexecutar após falha é seguro.
       await migration.up();
       await execDml(
         "INSERT INTO MONT_MIGRATIONS (ID, DESCRIPTION) VALUES (:id, :desc)",

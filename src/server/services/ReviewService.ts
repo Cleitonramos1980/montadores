@@ -231,8 +231,28 @@ export class ReviewService {
     const needsSac = score <= 6 || !!complaintReason;
 
     if (!needsSac) {
+      // Guarda de estado: uma avaliação positiva NÃO pode furar o bloqueio de SAC.
+      // Se já houver um caso de SAC aberto para este job (ex.: aberto na avaliação de
+      // atendimento/entrega), mantém o pagamento BLOQUEADO e não libera automaticamente.
+      // Espelha a guarda de PaymentService.release.
+      // SAC aberto por PEDIDO (não por job): o canal de avaliação novo abre SAC com
+      // ASSEMBLY_JOB_ID nulo; filtrar por job não o enxergaria e furaria o bloqueio.
+      const sacOpen = await queryOne<{ value: number }>(
+        `SELECT COUNT(*) AS VALUE FROM MONT_SAC_CASES
+         WHERE ORDER_ID = :orderId AND STATUS NOT IN ('RESOLVIDO','ENCERRADO','CANCELADO')`,
+        { orderId },
+      );
+      if (Number(sacOpen?.value ?? 0) > 0) {
+        return { id, classification, payment: "BLOQUEADO" };
+      }
+
+      // Condicionado ao status: só libera um pagamento que ainda NÃO avançou. Sem o
+      // NOT IN, este UPDATE regrediria um pagamento já PROGRAMADO/PAGO de volta para
+      // LIBERADO (abrindo re-pagamento) — espelha a guarda de PaymentService.release e
+      // do EvaluationResponseService (o outro caminho de avaliação).
       await execDml(
-        "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', UPDATED_AT = SYSTIMESTAMP WHERE ASSEMBLY_JOB_ID = :jobId",
+        `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', UPDATED_AT = SYSTIMESTAMP
+         WHERE ASSEMBLY_JOB_ID = :jobId AND STATUS NOT IN ('LIBERADO','PROGRAMADO','PAGO','PROCESSANDO_PIX','CANCELADO')`,
         { jobId: assemblyJobId },
       );
       await execDml(

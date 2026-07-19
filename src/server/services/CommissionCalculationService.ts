@@ -112,7 +112,11 @@ export class CommissionCalculationService {
           commissionAmount = valorBase * (Number(rule.commission_percent) / 100);
         }
 
-        totalCommission += commissionAmount;
+        // Arredonda para centavos (banco é NUMBER(14,2)) a cada item e acumula em 2 casas
+        // a cada passo — garante que a soma dos itens bata exatamente com o total, sem
+        // divergência de ponto flutuante.
+        commissionAmount = Math.round(commissionAmount * 100) / 100;
+        totalCommission  = Math.round((totalCommission + commissionAmount) * 100) / 100;
         calcItems.push({
           id: uuid(), payment_id: paymentId, numped: payment.numped,
           codprod, descricao: item.descricao ?? null, unidade: item.unidade ?? null,

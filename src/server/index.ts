@@ -62,6 +62,19 @@ async function shutdown(signal: string): Promise<void> {
   try {
     const { scheduler } = await import("./services/MessageSchedulerService");
     scheduler.stop();
+    // Drena o ciclo em andamento antes de fechar o pool: um ciclo pode estar no meio
+    // de um sync/envio usando conexões Oracle. Espera 'running' zerar, com teto de
+    // tempo para não travar o shutdown indefinidamente.
+    const DRAIN_TIMEOUT_MS = 10_000;
+    const DRAIN_POLL_MS = 200;
+    const drainDeadline = Date.now() + DRAIN_TIMEOUT_MS;
+    const isCycleRunning = () => (scheduler as unknown as { running?: boolean }).running === true;
+    while (isCycleRunning() && Date.now() < drainDeadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
+    }
+    if (isCycleRunning()) {
+      logger.warn("[shutdown] ciclo do scheduler não drenou dentro do timeout — prosseguindo");
+    }
   } catch { /* scheduler pode nem ter iniciado */ }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await closeOraclePool().catch(() => {});

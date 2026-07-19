@@ -126,6 +126,50 @@ export class OrderService {
     };
   }
 
+  /**
+   * DTO público enxuto para a jornada do cliente (link público, sem auth).
+   * Diferente de detail(): NÃO expõe audit, payments, sacCases, e-mail, telefone
+   * ou endereço — apenas o mínimo para o cliente acompanhar o pedido.
+   */
+  async detailPublic(id: string) {
+    const order = await queryOne<Record<string, unknown>>(
+      `SELECT o.ID, o.NUMPED, o.CURRENT_STATUS, o.HAS_ASSEMBLY,
+              c.NAME AS CUSTOMER_NAME
+       FROM MONT_ORDERS o
+       JOIN MONT_CUSTOMERS c ON c.ID = o.CUSTOMER_ID
+       WHERE o.ID = :id OR o.NUMPED = :id`,
+      { id },
+    );
+    if (!order) throw new AppError("Pedido não encontrado.", 404, "NOT_FOUND");
+    const orderId = String(order.id);
+
+    const [items, timeline] = await Promise.all([
+      queryRows<Record<string, unknown>>(
+        "SELECT DESCRIPTION, QUANTITY, REQUIRES_ASSEMBLY FROM MONT_ORDER_ITEMS WHERE ORDER_ID = :id",
+        { id: orderId },
+      ),
+      queryRows<Record<string, unknown>>(
+        `SELECT TITLE, CREATED_AT FROM MONT_ORDER_TIMELINE
+         WHERE ORDER_ID = :id AND VISIBLE_TO_CUSTOMER = 1
+         ORDER BY CREATED_AT ASC`,
+        { id: orderId },
+      ),
+    ]);
+
+    // Apenas o primeiro nome, para não expor o nome completo do cliente.
+    const fullName = String(order.customer_name ?? "").trim();
+    const firstName = fullName ? fullName.split(/\s+/)[0] : null;
+
+    return {
+      numped: order.numped ?? null,
+      customer_name: firstName,
+      current_status: order.current_status ?? null,
+      has_assembly: order.has_assembly ?? null,
+      timeline,
+      items,
+    };
+  }
+
   async dashboard() {
     const metric = async (sql: string, binds: Record<string, unknown> = {}) => {
       const row = await queryOne<{ value: number }>(sql, binds);

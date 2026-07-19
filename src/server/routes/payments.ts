@@ -15,6 +15,7 @@ const financeiroRoles    = requireRole("FINANCEIRO", "ADMIN", "GESTOR");
 const commissionWriteRoles = requireRole("ADMIN", "GESTOR");
 const commissionReadRoles  = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA", "FINANCEIRO");
 const winthorAdminRoles    = requireRole("ADMIN", "GESTOR");
+const winthorReadRoles     = requireRole("ADMIN", "GESTOR", "OPERACAO", "FINANCEIRO", "LOGISTICA", "SAC");
 
 // ── Payments ──────────────────────────────────────────────────────────────────
 
@@ -359,7 +360,7 @@ paymentsRouter.post("/integration/failures/:id/retry", asyncRoute(async (req, re
 
 // ── WinThor read-only lookup ──────────────────────────────────────────────────
 
-paymentsRouter.get("/winthor/orders", asyncRoute(async (req, res) => {
+paymentsRouter.get("/winthor/orders", winthorReadRoles, asyncRoute(async (req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) { res.json([]); return; }
 
@@ -413,7 +414,7 @@ paymentsRouter.get("/winthor/orders", asyncRoute(async (req, res) => {
   ));
 }));
 
-paymentsRouter.get("/winthor/orders/:numped", asyncRoute(async (req, res) => {
+paymentsRouter.get("/winthor/orders/:numped", winthorReadRoles, asyncRoute(async (req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) throw new Error("Oracle não disponível.");
   const { WinthorAdapter } = await import("../oracle/WinthorAdapter");
@@ -429,7 +430,7 @@ paymentsRouter.get("/winthor/orders/:numped", asyncRoute(async (req, res) => {
   res.json({ order: orderRows[0], items, invoice: invoices[0] ?? null, synced_id: synced?.id ?? null });
 }));
 
-paymentsRouter.get("/winthor/customers/:codcli", asyncRoute(async (req, res) => {
+paymentsRouter.get("/winthor/customers/:codcli", winthorReadRoles, asyncRoute(async (req, res) => {
   const { WinthorAdapter } = await import("../oracle/WinthorAdapter");
   const customer = await new WinthorAdapter().getCustomerById(param(req.params.codcli));
   res.json(customer[0] ?? null);

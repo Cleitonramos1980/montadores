@@ -61,7 +61,29 @@ export class WhatsAppProviderService {
   }): Promise<WhatsAppSendResult> {
     const { to, text, modo } = params;
 
+    // Trava ABSOLUTA de ambiente: sem MESSAGES_LIVE='true' explicitamente setado no
+    // processo, NENHUMA mensagem real é enviada — o send SEMPRE retorna SIMULADO,
+    // ignorando o modo configurado no banco. Garante DRY_RUN permanente por código (não
+    // só por config): como MESSAGES_LIVE não está setado, jamais se chega a chamar fetch().
+    if (process.env.MESSAGES_LIVE !== "true") {
+      return { status: "SIMULADO" };
+    }
+
     if (modo === "DRY_RUN") {
+      return { status: "SIMULADO" };
+    }
+
+    // Portão anti-banimento: mesmo com MESSAGES_LIVE=true, o envio REAL só é permitido
+    // pela via OFICIAL (Meta Cloud API). O provedor não-oficial (uazapiGO) tem altíssimo
+    // risco de banimento permanente do número da empresa (WhatsApp bane APIs não-oficiais),
+    // então ele NUNCA é usado para envio real — a menos que WHATSAPP_OFFICIAL_ACK=true
+    // reconheça o risco de forma explícita e deliberada.
+    const officialMeta = !!process.env.META_PHONE_ID && !!process.env.META_WHATSAPP_TOKEN;
+    if (!officialMeta && process.env.WHATSAPP_OFFICIAL_ACK !== "true") {
+      logger.error(
+        "[whatsapp] Envio real BLOQUEADO por segurança: MESSAGES_LIVE=true sem provedor OFICIAL (Meta). " +
+        "O provedor não-oficial não é usado para envio real (risco de ban). Retornando SIMULADO.",
+      );
       return { status: "SIMULADO" };
     }
 

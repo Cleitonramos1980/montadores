@@ -19,17 +19,23 @@ for (const role of roles) {
 }
 
 // ── Admin user ───────────────────────────────────────────────────────────────
-const adminEmail = process.env.ADMIN_EMAIL ?? "admin@montadores.com";
-const adminPassword = process.env.ADMIN_PASSWORD ?? "Admin@2026!";
-const adminExists = await queryOne("SELECT ID FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)", { email: adminEmail });
-if (!adminExists) {
-  const auth = new AuthService();
-  const { id } = await auth.createUser({ name: "Administrador", email: adminEmail, password: adminPassword, role: "ADMIN" });
-  const gestorRole = await queryOne<{ id: string }>("SELECT ID FROM MONT_ROLES WHERE NAME = 'GESTOR'", {});
-  if (gestorRole) {
-    await execDml("INSERT INTO MONT_USER_ROLES (USER_ID, ROLE_ID) VALUES (:u, :r)", { u: id, r: gestorRole.id });
+// Só semeia quando ADMIN_EMAIL e ADMIN_PASSWORD vierem do ambiente — sem fallback
+// fixo. createUser aplica bcrypt. A senha NUNCA é logada.
+const adminEmail = process.env.ADMIN_EMAIL;
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (!adminEmail || !adminPassword) {
+  console.warn("[seed] ADMIN_EMAIL/ADMIN_PASSWORD não definidos — admin não será semeado.");
+} else {
+  const adminExists = await queryOne("SELECT ID FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)", { email: adminEmail });
+  if (!adminExists) {
+    const auth = new AuthService();
+    const { id } = await auth.createUser({ name: "Administrador", email: adminEmail, password: adminPassword, role: "ADMIN" });
+    const gestorRole = await queryOne<{ id: string }>("SELECT ID FROM MONT_ROLES WHERE NAME = 'GESTOR'", {});
+    if (gestorRole) {
+      await execDml("INSERT INTO MONT_USER_ROLES (USER_ID, ROLE_ID) VALUES (:u, :r)", { u: id, r: gestorRole.id });
+    }
+    console.log(`[seed] Admin criado: ${adminEmail}`);
   }
-  console.log(`[seed] Admin criado: ${adminEmail} / ${adminPassword}`);
 }
 
 // ── Demo provider ────────────────────────────────────────────────────────────

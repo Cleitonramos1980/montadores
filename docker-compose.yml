@@ -8,13 +8,16 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3333
-      # Oracle — override with real values or use an .env file
+      # Oracle — override with real values or use an .env file (nada de segredo commitado aqui).
       - ORACLE_USER=${ORACLE_USER:-}
       - ORACLE_PASSWORD=${ORACLE_PASSWORD:-}
-      - ORACLE_CONNECTION_STRING=${ORACLE_CONNECTION_STRING:-}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      # config.ts lê ORACLE_CONNECT_STRING (não ORACLE_CONNECTION_STRING).
+      - ORACLE_CONNECT_STRING=${ORACLE_CONNECT_STRING:-}
+      # Segredos obrigatórios: vêm do .env/ambiente. A sintaxe ${VAR:?msg} FALHA o boot
+      # se ausente, em vez de embutir um valor-padrão fraco no repositório.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET obrigatorio (min. 32 chars, ver config.ts)}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@montadores.com}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin@2026!}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD obrigatorio}
     volumes:
       - uploads:/app/uploads
     restart: unless-stopped

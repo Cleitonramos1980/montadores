@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
+import bcrypt from "bcrypt";
 import { v4 as uuid } from "uuid";
-import { config } from "../config";
 import { executeOracle, isOracleEnabled } from "./oracle";
 import { execDml, queryOne } from "./db";
 
@@ -960,9 +959,17 @@ async function seedDefaultData(): Promise<void> {
     }
   }
 
-  // Seed admin user
-  const adminEmail = process.env.ADMIN_EMAIL ?? "admin@montadores.com";
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "Admin@2026!";
+  // Seed admin user — somente quando ADMIN_EMAIL e ADMIN_PASSWORD são fornecidos
+  // via ambiente. Sem fallback fixo: nenhum usuário/senha hardcoded é criado.
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    console.warn(
+      "[initTables] ADMIN_EMAIL/ADMIN_PASSWORD não definidos — admin padrão não será semeado.",
+    );
+    return;
+  }
 
   const existing = await queryOne<{ cnt: number }>(
     "SELECT COUNT(*) AS CNT FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)",
@@ -971,9 +978,7 @@ async function seedDefaultData(): Promise<void> {
 
   if (Number(existing?.cnt ?? 0) === 0) {
     const userId = uuid();
-    const hash = createHash("sha256")
-      .update(`${adminPassword}:montadores:${config.jwtSecret}`)
-      .digest("hex");
+    const hash = await bcrypt.hash(adminPassword, 12);
 
     await execDml(
       "INSERT INTO MONT_USERS (ID, NAME, EMAIL, PASSWORD_HASH, STATUS) VALUES (:id, :name, :email, :hash, 'ATIVO')",
@@ -992,34 +997,6 @@ async function seedDefaultData(): Promise<void> {
     }
 
     console.log(`[initTables] Admin seed criado: ${adminEmail}`);
-  }
-
-  // Seed usuário Cleiton
-  const cleitonEmail = "cleiton.ramos@hotmail.com";
-  const cleitonExists = await queryOne<{ cnt: number }>(
-    "SELECT COUNT(*) AS CNT FROM MONT_USERS WHERE LOWER(EMAIL) = LOWER(:email)",
-    { email: cleitonEmail },
-  );
-  if (Number(cleitonExists?.cnt ?? 0) === 0) {
-    const userId = uuid();
-    const hash = createHash("sha256")
-      .update(`123456:montadores:${config.jwtSecret}`)
-      .digest("hex");
-    await execDml(
-      "INSERT INTO MONT_USERS (ID, NAME, EMAIL, PASSWORD_HASH, STATUS) VALUES (:id, :name, :email, :hash, 'ATIVO')",
-      { id: userId, name: "Cleiton Ramos", email: cleitonEmail, hash },
-    );
-    const adminRole = await queryOne<{ id: string }>(
-      "SELECT ID FROM MONT_ROLES WHERE NAME = :name",
-      { name: "ADMIN" },
-    );
-    if (adminRole) {
-      await execDml(
-        "INSERT INTO MONT_USER_ROLES (USER_ID, ROLE_ID) VALUES (:userId, :roleId)",
-        { userId, roleId: adminRole.id },
-      );
-    }
-    console.log(`[initTables] Usuário Cleiton seed criado: ${cleitonEmail}`);
   }
 }
 

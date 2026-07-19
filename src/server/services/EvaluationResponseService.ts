@@ -55,8 +55,11 @@ export class EvaluationResponseService {
           if (!q) return a.valueNumber!;
           // STARS: typically 1-5, normalize to 0-10
           if (q.type === "STARS") return ((a.valueNumber! - 1) / 4) * 10;
-          // SCALE: assume already 0-10
-          return a.valueNumber!;
+          // SCALE: convenção do sistema é 0-10 (a UI pública sempre renderiza 0-10).
+          // Clamp defensivo: uma resposta fora de 0-10 nunca deve distorcer a média nem
+          // classificar erroneamente um promotor como detrator (o que abriria SAC e
+          // bloquearia pagamento indevidamente).
+          return Math.max(0, Math.min(10, a.valueNumber!));
         });
       score = answeredNums.reduce((s, v) => s + v, 0) / answeredNums.length;
       score = Math.round(score * 10) / 10;
@@ -202,7 +205,7 @@ export class EvaluationResponseService {
            ) AND p.STATUS = 'AGUARDANDO_AVALIACAO_CLIENTE'
            AND NOT EXISTS (
              SELECT 1 FROM MONT_SAC_CASES sc
-             WHERE sc.ASSEMBLY_JOB_ID = p.ASSEMBLY_JOB_ID
+             WHERE sc.ORDER_ID = :orderId
                AND sc.STATUS NOT IN ('RESOLVIDO','ENCERRADO','CANCELADO')
            )`,
           { orderId: montOrder.id },

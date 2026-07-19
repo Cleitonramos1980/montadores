@@ -41,6 +41,14 @@ describe("WhatsAppProviderService.send", () => {
 
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    // Estes testes exercitam a LÓGICA de envio real (fetch mockado, nenhuma mensagem
+    // sai de verdade). A trava de segurança MESSAGES_LIVE força SIMULADO quando != "true";
+    // aqui optamos por "true" para poder testar o caminho de envio. Removida no afterEach.
+    process.env.MESSAGES_LIVE = "true";
+    // Reconhece o provedor não-oficial: estes testes exercitam a LÓGICA de envio via
+    // uazapiGO/Meta (fetch mockado). Em produção, sem este ACK e sem Meta oficial, o
+    // envio real é bloqueado por segurança (anti-ban) — comportamento coberto à parte.
+    process.env.WHATSAPP_OFFICIAL_ACK = "true";
     // Clear env vars before each test
     delete process.env.WHATSAPP_UAZAPI_URL;
     delete process.env.WHATSAPP_UAZAPI_TOKEN;
@@ -50,10 +58,30 @@ describe("WhatsAppProviderService.send", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.MESSAGES_LIVE;
+    delete process.env.WHATSAPP_OFFICIAL_ACK;
   });
 
   it("modo DRY_RUN → SIMULADO sem chamar fetch", async () => {
     const r = await svc.send({ to: "11999990000", text: "Olá", modo: "DRY_RUN" });
+    expect(r.status).toBe("SIMULADO");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("trava MESSAGES_LIVE: sem MESSAGES_LIVE='true', mesmo em PRODUCAO com provider configurado → SIMULADO (nunca envia)", async () => {
+    delete process.env.MESSAGES_LIVE;                       // trava de DRY_RUN permanente ativa
+    process.env.WHATSAPP_UAZAPI_URL   = "https://api.uazapi.test";
+    process.env.WHATSAPP_UAZAPI_TOKEN = "tok123";
+    const r = await svc.send({ to: "11999990000", text: "Olá", modo: "PRODUCAO" });
+    expect(r.status).toBe("SIMULADO");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("trava anti-ban: MESSAGES_LIVE=true, provedor não-oficial e sem ACK/Meta oficial → SIMULADO (nunca envia)", async () => {
+    delete process.env.WHATSAPP_OFFICIAL_ACK;               // sem reconhecimento explícito do risco
+    process.env.WHATSAPP_UAZAPI_URL   = "https://api.uazapi.test";
+    process.env.WHATSAPP_UAZAPI_TOKEN = "tok123";
+    const r = await svc.send({ to: "11999990000", text: "Olá", modo: "PRODUCAO" });
     expect(r.status).toBe("SIMULADO");
     expect(fetch).not.toHaveBeenCalled();
   });

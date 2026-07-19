@@ -1,8 +1,14 @@
-import { executeOracle } from "../db/oracle";
+import { executeOracle, isOraclePoolInitialized } from "../db/oracle";
+import { ServiceUnavailableError } from "../errors";
 
 type AnyRow = Record<string, unknown>;
 
 async function oq<T = AnyRow>(sql: string, binds: Record<string, unknown> = {}): Promise<T[]> {
+  // Durante o boot (ex.: sem VPN) o pool ainda não subiu. Lançamos um erro
+  // identificável (503) para o handler traduzir, em vez de um 500 cru do driver.
+  if (!isOraclePoolInitialized()) {
+    throw new ServiceUnavailableError("WinThor indisponível: pool Oracle não inicializado.");
+  }
   const result = await executeOracle<T>(sql, binds);
   return (result.rows as T[] | undefined) ?? [];
 }
@@ -48,14 +54,17 @@ export class WinthorAdapter {
     );
   }
 
-  async getOrdersUpdatedSince(date: Date) {
+  async getOrdersUpdatedSince(date: Date, maxRows = 5000) {
+    // Teto de linhas: um "since" muito antigo não pode varrer a PCPEDC inteira
+    // (N+1 no scheduler). O clamp do próprio "since" é feito na rota.
     return oq(
       `SELECT p.NUMPED, p.CODCLI, p.CODFILIAL, p.VLTOTAL,
               p.DATA, p.DTENTREGA, p.POSICAO, p.NUMCAR, p.CODTRANSP
        FROM PCPEDC p
        WHERE p.DATA >= :since
-       ORDER BY p.DATA DESC`,
-      { since: date },
+       ORDER BY p.DATA DESC
+       FETCH FIRST :maxRows ROWS ONLY`,
+      { since: date, maxRows },
     );
   }
 
@@ -176,12 +185,20 @@ export class WinthorAdapter {
   }
 
   async nextCodfornec(): Promise<number> {
+    // RISCO: MAX+1 é sujeito a corrida (dois inserts simultâneos geram o mesmo
+    // código). O correto no ERP é uma SEQUENCE (ex.: PCFORNEC_SEQ.NEXTVAL).
+    // Só é chamado quando ERP_WRITE_ENABLED='true' (escrita no ERP habilitada).
     const rows = await oq<{ maxcode: number }>(
       "SELECT NVL(MAX(CODFORNEC), 0) + 1 AS MAXCODE FROM PCFORNEC",
     );
     return Number(rows[0]?.maxcode ?? 1);
   }
 
+  /**
+   * Escrita no ERP (PCFORNEC) — DESLIGADA por padrão. WinThor é somente leitura;
+   * só grava se ERP_WRITE_ENABLED === 'true'. Sem a flag, retorna null e o
+   * fornecedor fica apenas em MONT_PROVIDERS (codfornec pendente).
+   */
   async insertSupplier(data: {
     fornecedor: string;
     fantasia?: string;
@@ -192,7 +209,10 @@ export class WinthorAdapter {
     telrep?: string;
     email?: string;
     eredespacho?: string;
-  }): Promise<number> {
+  }): Promise<number | null> {
+    if (process.env.ERP_WRITE_ENABLED !== "true") {
+      return null;
+    }
     const codfornec = await this.nextCodfornec();
     await oq(
       `INSERT INTO PCFORNEC

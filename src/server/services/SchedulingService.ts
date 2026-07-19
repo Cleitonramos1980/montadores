@@ -29,7 +29,9 @@ export class SchedulingService {
   }
 
   async schedule(orderId: string, providerId: string, date: string, period: string) {
-    const provider = await queryOne(
+    this.assertValidFutureDate(date);
+
+    const provider = await queryOne<{ id: string; capacity_per_day: number }>(
       "SELECT * FROM MONT_PROVIDERS WHERE ID = :id AND STATUS = 'APROVADO' AND ACTIVE = 1 AND DOCUMENTS_VALIDATED = 1",
       { id: providerId },
     );
@@ -40,17 +42,6 @@ export class SchedulingService {
       { id: orderId },
     );
     if (!order) throw new AppError("Pedido não encontrado.", 404, "NOT_FOUND");
-
-    // Idempotência por pedido: um pedido não pode ter dois agendamentos/jobs ativos
-    // (senão gera 2 montadores + 2 pagamentos para a mesma montagem).
-    const existing = await queryOne<{ value: number }>(
-      `SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_JOBS
-       WHERE ORDER_ID = :orderId AND STATUS IN ('AGENDADA','EM_EXECUCAO','FINALIZADA')`,
-      { orderId },
-    );
-    if (Number(existing?.value ?? 0) > 0) {
-      throw new AppError("Este pedido já possui uma montagem agendada.", 409, "CONFLICT");
-    }
 
     // Calculate assembly cost from VLMAODEOBRA stored in ASSEMBLY_COST column
     const costRow = await queryOne<{ total: number }>(
@@ -65,6 +56,44 @@ export class SchedulingService {
     const jobId = uuid();
     // Atômico: schedule + job + pagamento + status do pedido são tudo-ou-nada.
     await withTransaction(async (tx) => {
+      // Bloqueio pessimista da linha do pedido: serializa dois gestores concorrentes
+      // agendando o MESMO pedido (não há índice único por ORDER_ID aqui — o dono de
+      // initTables é outro módulo — então a proteção é transacional).
+      await tx.queryOne(
+        "SELECT ID FROM MONT_ORDERS WHERE ID = :id FOR UPDATE",
+        { id: orderId },
+      );
+
+      // Idempotência por pedido, agora DENTRO do bloqueio: um pedido não pode ter dois
+      // agendamentos/jobs ativos (senão gera 2 montadores + 2 pagamentos p/ a mesma montagem).
+      const existing = await tx.queryOne<{ value: number }>(
+        `SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_JOBS
+         WHERE ORDER_ID = :orderId AND STATUS IN ('AGENDADA','EM_EXECUCAO','FINALIZADA')`,
+        { orderId },
+      );
+      if (Number(existing?.value ?? 0) > 0) {
+        throw new AppError("Este pedido já possui uma montagem agendada.", 409, "CONFLICT");
+      }
+
+      // Respeita a capacidade diária do montador (evita over-booking) quando definida (>0).
+      const capacity = Number(provider.capacity_per_day ?? 0);
+      if (capacity > 0) {
+        const used = await tx.queryOne<{ value: number }>(
+          `SELECT COUNT(*) AS VALUE FROM MONT_ASSEMBLY_SCHEDULES s
+           JOIN MONT_ASSEMBLY_JOBS j ON j.SCHEDULE_ID = s.ID
+           WHERE s.PROVIDER_ID = :providerId AND s.SCHEDULED_DATE = :date
+             AND j.STATUS IN ('AGENDADA','EM_EXECUCAO','FINALIZADA')`,
+          { providerId, date },
+        );
+        if (Number(used?.value ?? 0) >= capacity) {
+          throw new AppError(
+            "Montador já atingiu a capacidade de agendamentos para esta data.",
+            409,
+            "CONFLICT",
+          );
+        }
+      }
+
       await tx.exec(
         `INSERT INTO MONT_ASSEMBLY_SCHEDULES (ID, ORDER_ID, PROVIDER_ID, SCHEDULED_DATE, SCHEDULED_PERIOD)
          VALUES (:id, :orderId, :providerId, :scheduledDate, :scheduledPeriod)`,
@@ -99,5 +128,25 @@ export class SchedulingService {
     });
 
     return { scheduleId, jobId, amount };
+  }
+
+  /**
+   * Valida a data de agendamento: formato AAAA-MM-DD, data de calendário real e não
+   * anterior a "hoje" no fuso de operação (America/Sao_Paulo). Rejeita com erro claro.
+   */
+  private assertValidFutureDate(date: string): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) {
+      throw new AppError("Data de agendamento inválida. Use o formato AAAA-MM-DD.", 400, "BAD_REQUEST");
+    }
+    const [y, m, d] = date.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+      throw new AppError("Data de agendamento inválida.", 400, "BAD_REQUEST");
+    }
+    // "Hoje" no fuso de operação; comparação lexicográfica de datas ISO (AAAA-MM-DD).
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    if (date < today) {
+      throw new AppError("Data de agendamento não pode ser no passado.", 400, "BAD_REQUEST");
+    }
   }
 }

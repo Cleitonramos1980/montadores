@@ -62,23 +62,29 @@ export class DispatchGateService {
     const { sendHourStart = 8, sendHourEnd = 21, nowOverride } = params;
     const now = nowOverride ?? new Date();
 
-    // Converter para horário de Brasília (UTC-3)
-    const brOffset = -3 * 60;
-    const utc = now.getTime() + now.getTimezoneOffset() * 60_000;
-    const brTime = new Date(utc + brOffset * 60_000);
-
-    const dow     = brTime.getDay();   // 0=Dom, 6=Sáb
-    const hour    = brTime.getHours();
-    const dateStr = brTime.toISOString().slice(0, 10);
+    // Deriva data/hora/dia-da-semana no FUSO DE OPERAÇÃO via Intl.DateTimeFormat (mesma
+    // abordagem do MessageSchedulerService). Antes o código misturava acessores locais
+    // (getDay/getHours) com UTC (toISOString) sobre um mesmo Date deslocado, produzindo
+    // janela/feriado errados em servidor fora de UTC (duplo offset).
+    const tz = process.env.SCHEDULER_TIMEZONE || "America/Sao_Paulo";
+    const dateStr = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(now); // YYYY-MM-DD no fuso de operação
+    const hour = Number(
+      new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", hourCycle: "h23" }).format(now),
+    );
+    // Dia da semana da data civil (0=Dom … 6=Sáb) — UTC-safe a partir de dateStr.
+    const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+    const year = Number(dateStr.slice(0, 4));
 
     if (dow === 0 || dow === 6) {
       return { allowed: false, reason: "Fim de semana" };
     }
-    if (feriadosDoAno(brTime.getUTCFullYear()).has(dateStr)) {
+    if (feriadosDoAno(year).has(dateStr)) {
       return { allowed: false, reason: `Feriado nacional: ${dateStr}` };
     }
     if (hour < sendHourStart || hour >= sendHourEnd) {
-      return { allowed: false, reason: `Fora do horário permitido (${sendHourStart}h–${sendHourEnd}h BRT)` };
+      return { allowed: false, reason: `Fora do horário permitido (${sendHourStart}h–${sendHourEnd}h ${tz})` };
     }
     return { allowed: true };
   }

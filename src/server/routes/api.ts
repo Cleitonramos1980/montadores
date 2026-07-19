@@ -37,11 +37,15 @@ const messageTemplates = new MessageTemplateService();
 const evalLinks = new EvaluationLinkService();
 
 // Guardas de papel — espelham os routers dedicados (payments.ts / providers.ts).
-// Necessárias porque este router é montado primeiro e sombreia aquelas rotas.
+// Este router agora é montado por ÚLTIMO (os dedicados resolvem as rotas
+// duplicadas primeiro); as guardas ficam como defesa em profundidade e valem
+// para as rotas exclusivas deste router.
 const adminGestor = requireRole("ADMIN", "GESTOR");
 const financeiro  = requireRole("FINANCEIRO", "ADMIN", "GESTOR");
 const operacao    = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA");
 const staff       = requireRole("ADMIN", "GESTOR", "OPERACAO", "FINANCEIRO", "LOGISTICA", "SAC");
+const commissionReadRoles = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA", "FINANCEIRO");
+const assemblyOpRoles     = requireRole("MONTADOR", "ADMIN", "GESTOR", "OPERACAO");
 
 const param = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : String(value ?? "");
 
@@ -53,21 +57,29 @@ function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) =
 
 // ── Public routes (no auth) ───────────────────────────────────────────────────
 
+// Ping de banco com TETO DE TEMPO: liveness/readiness não podem ficar presos por
+// 20-60s no timeout do driver Oracle quando o banco/VPN cai. Faz uma query real (detecta
+// conexão morta, não só a flag do pool) mas responde em no máximo ~timeoutMs, reportando
+// "error" se estourar. A query órfã se resolve sozinha em segundo plano (pool com callTimeout).
+async function pingDb(timeoutMs = 2500): Promise<"ok" | "error"> {
+  try {
+    const { queryOne } = await import("../db/db");
+    await Promise.race([
+      queryOne("SELECT 1 AS OK FROM DUAL"),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("db-ping-timeout")), timeoutMs)),
+    ]);
+    return "ok";
+  } catch {
+    return "error";
+  }
+}
+
 api.get("/health", asyncRoute(async (_req, res) => {
+  // Liveness: SEMPRE responde rápido (200). Sinaliza o estado do banco em 'db' sem
+  // bloquear no timeout do driver durante uma queda de Oracle/VPN.
   let db: "disabled" | "ok" | "error" = "disabled";
   if (isOracleEnabled()) {
-    if (!isOraclePoolInitialized()) {
-      db = "error";
-    } else {
-      // Executa uma query real (não só a flag do pool) para detectar conexões mortas.
-      try {
-        const { queryOne } = await import("../db/db");
-        await queryOne("SELECT 1 AS OK FROM DUAL");
-        db = "ok";
-      } catch {
-        db = "error";
-      }
-    }
+    db = isOraclePoolInitialized() ? await pingDb() : "error";
   }
   res.json({ ok: true, service: "app-montadores", db });
 }));
@@ -77,13 +89,9 @@ api.get("/health", asyncRoute(async (_req, res) => {
 // é liveness e sempre responde 200). 'disabled' (Oracle não configurado) conta como pronto.
 api.get("/ready", asyncRoute(async (_req, res) => {
   if (!isOracleEnabled()) { res.json({ ready: true, db: "disabled" }); return; }
-  try {
-    const { queryOne } = await import("../db/db");
-    await queryOne("SELECT 1 AS OK FROM DUAL");
-    res.json({ ready: true, db: "ok" });
-  } catch {
-    res.status(503).json({ ready: false, db: "error" });
-  }
+  const db = isOraclePoolInitialized() ? await pingDb() : "error";
+  if (db === "ok") { res.json({ ready: true, db: "ok" }); return; }
+  res.status(503).json({ ready: false, db: "error" });
 }));
 
 api.get("/public/branding", (_req, res) => {
@@ -100,7 +108,8 @@ api.post("/auth/login", asyncRoute(async (req, res) => {
 
 api.get("/public/journey/:token", asyncRoute(async (req, res) => {
   const token = await tokens.validate(param(req.params.token), "JORNADA_CLIENTE");
-  res.json(await orders.detail(token.order_id));
+  // DTO enxuto: link público não deve expor audit/payments/sacCases/PII completa.
+  res.json(await orders.detailPublic(token.order_id));
 }));
 
 api.get("/public/slots/:token", asyncRoute(async (req, res) => {
@@ -169,6 +178,9 @@ api.get("/public/eval/:token", asyncRoute(async (req, res) => {
 api.post("/public/eval/:token/respond", asyncRoute(async (req, res) => {
   const link = await evalLinks.getByToken(param(req.params.token));
   if (!link) { res.status(404).json({ error: "Link não encontrado." }); return; }
+  // Espelha a validação da rota GET: link expirado ou já usado não aceita resposta.
+  if (link.expiresAt < new Date()) { res.status(410).json({ error: "Link de avaliação expirado." }); return; }
+  if (link.usedAt) { res.status(410).json({ error: "Esta avaliação já foi respondida." }); return; }
   const body = z.object({
     answers: z.array(z.object({
       questionId: z.string(),
@@ -209,18 +221,18 @@ api.use(authMiddleware);
 api.get("/auth/me", asyncRoute(async (req, res) => res.json(await auth.me(req.user!.sub))));
 
 // Dashboard
-api.get("/dashboard", asyncRoute(async (_req, res) => res.json(await orders.dashboard())));
+api.get("/dashboard", staff, asyncRoute(async (_req, res) => res.json(await orders.dashboard())));
 
 // Orders
 api.post("/orders/demo", asyncRoute(async (_req, res) => res.status(201).json(await orders.createDemoOrder())));
-api.get("/orders", asyncRoute(async (req, res) =>
+api.get("/orders", staff, asyncRoute(async (req, res) =>
   res.json(await orders.list({
     status: req.query.status as string | undefined,
     limit: req.query.limit as string | undefined,
     offset: req.query.offset as string | undefined,
   }))
 ));
-api.get("/orders/:id", asyncRoute(async (req, res) => res.json(await orders.detail(param(req.params.id)))));
+api.get("/orders/:id", staff, asyncRoute(async (req, res) => res.json(await orders.detail(param(req.params.id)))));
 api.post("/orders/:id/public-token", operacao, asyncRoute(async (req, res) => res.status(201).json(await tokens.create(param(req.params.id), "JORNADA_CLIENTE"))));
 
 // Providers
@@ -286,7 +298,9 @@ async function resolveAssemblyProviderGuard(req: any): Promise<string | null> {
   const { roles, email } = req.user as { roles: string[]; email: string };
   const isPrivileged = roles.includes("ADMIN") || roles.includes("GESTOR") || roles.includes("OPERACAO");
   if (isPrivileged) return null;
-  if (!roles.includes("MONTADOR")) return null;
+  // Papel não-privilegiado e não-montador: retorna o sentinela (nunca casa nenhum
+  // PROVIDER_ID), em vez de null — que daria acesso irrestrito ao job.
+  if (!roles.includes("MONTADOR")) return "__NOT_FOUND__";
   const { queryOne: qo } = await import("../db/db");
   const provider = await qo<{ id: string }>(
     "SELECT ID FROM MONT_PROVIDERS WHERE LOWER(EMAIL) = LOWER(:email) AND ACTIVE = 1",
@@ -296,17 +310,18 @@ async function resolveAssemblyProviderGuard(req: any): Promise<string | null> {
   return provider?.id ?? "__NOT_FOUND__";
 }
 
-// Assembly
-api.post("/assembly/:jobId/start", asyncRoute(async (req, res) => {
+// Assembly — requireRole espelha assembly.ts (defesa em profundidade; o router
+// dedicado resolve estas rotas primeiro).
+api.post("/assembly/:jobId/start", assemblyOpRoles, asyncRoute(async (req, res) => {
   const guard = await resolveAssemblyProviderGuard(req);
   res.json(await assembly.start(param(req.params.jobId), guard));
 }));
-api.post("/assembly/:jobId/photos", asyncRoute(async (req, res) => {
+api.post("/assembly/:jobId/photos", assemblyOpRoles, asyncRoute(async (req, res) => {
   const body = z.object({ fileUrl: httpUrl, photoType: z.string().optional() }).parse(req.body);
   const guard = await resolveAssemblyProviderGuard(req);
   res.status(201).json(await assembly.addPhoto(param(req.params.jobId), body.fileUrl, body.photoType, guard));
 }));
-api.post("/assembly/:jobId/finish", asyncRoute(async (req, res) => {
+api.post("/assembly/:jobId/finish", assemblyOpRoles, asyncRoute(async (req, res) => {
   const guard = await resolveAssemblyProviderGuard(req);
   res.json(await assembly.finish(param(req.params.jobId), guard));
 }));
@@ -522,8 +537,8 @@ api.put("/message-templates/:eventType", adminGestor, asyncRoute(async (req, res
 api.get("/flow-ruler", asyncRoute(async (_req, res) => res.json(await flow.ruler())));
 
 // SAC
-api.get("/sac", asyncRoute(async (_req, res) => res.json(await sac.list())));
-api.get("/sac/:id", asyncRoute(async (req, res) => res.json(await sac.getById(param(req.params.id)))));
+api.get("/sac", staff, asyncRoute(async (_req, res) => res.json(await sac.list())));
+api.get("/sac/:id", staff, asyncRoute(async (req, res) => res.json(await sac.getById(param(req.params.id)))));
 api.post("/orders/:id/sac", asyncRoute(async (req, res) => {
   const body = z.object({
     reason: z.string().min(3),
@@ -572,7 +587,11 @@ api.post("/integration/winthor/orders/:numped/sync", adminGestor, asyncRoute(asy
 ));
 api.post("/integration/winthor/sync-batch", adminGestor, asyncRoute(async (req, res) => {
   const body = z.object({ since: z.string().optional() }).parse(req.body);
-  const since = body.since ? new Date(body.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  // Clamp: 'since' inválido (NaN) ou anterior ao teto de ~90 dias usa o teto,
+  // evitando varredura arbitrariamente ampla do WinThor a partir da entrada.
+  const floor = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  const parsed = body.since ? new Date(body.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const since = (isNaN(parsed.getTime()) || parsed < floor) ? floor : parsed;
   res.status(202).json(await winthor.syncOrdersBatch(since, req.user!.sub));
 }));
 
@@ -664,7 +683,7 @@ api.get("/winthor/customers/:codcli", staff, asyncRoute(async (req, res) => {
 // ── Product Commissions ───────────────────────────────────────────────────────
 
 // List all configured commissions (MONT_PRODUCT_COMMISSIONS)
-api.get("/commissions", asyncRoute(async (_req, res) => {
+api.get("/commissions", commissionReadRoles, asyncRoute(async (_req, res) => {
   const { queryRows: qr } = await import("../db/db");
   res.json(await qr(
     `SELECT * FROM MONT_PRODUCT_COMMISSIONS ORDER BY DESCRIPTION ASC`,
@@ -672,7 +691,7 @@ api.get("/commissions", asyncRoute(async (_req, res) => {
 }));
 
 // Search PCPRODUT for assembly products (VLMAODEOBRA > 0) not yet configured
-api.get("/commissions/search", asyncRoute(async (req, res) => {
+api.get("/commissions/search", commissionReadRoles, asyncRoute(async (req, res) => {
   const { isOracleEnabled } = await import("../db/oracle");
   if (!isOracleEnabled()) { res.json([]); return; }
   const { queryRows: qr } = await import("../db/db");
@@ -820,7 +839,7 @@ api.get("/montador/minhas-montagens/:jobId", asyncRoute(async (req, res) => {
 }));
 
 // Search — orders and providers
-api.get("/search", asyncRoute(async (req, res) => {
+api.get("/search", staff, asyncRoute(async (req, res) => {
   const q = String(req.query.q ?? "").trim();
   if (q.length < 2 || !isOraclePoolInitialized()) {
     res.json({ orders: [], providers: [] }); return;

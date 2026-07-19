@@ -8,7 +8,7 @@ O workspace estava vazio, contendo apenas `.git`. Não havia código do Projeto 
 
 - React + TypeScript + Vite no front-end.
 - Node.js + TypeScript + Express no back-end.
-- SQLite local via `node:sqlite` para persistência de desenvolvimento.
+- Persistência de produção nas tabelas Oracle `MONT_*` (o arquivo SQLite é legado — ver "Persistência e dados").
 - Adapter Oracle/WinThor isolado em `src/server/oracle`.
 - Credenciais Oracle exclusivamente por variáveis de ambiente.
 - Serviços de eventos, timeline, auditoria, tokens públicos, agenda, montagem, avaliação, SAC, financeiro e integração.
@@ -41,6 +41,74 @@ Copie `.env.example` para `.env` quando precisar configurar o ambiente.
 - `ORACLE_POOL_INCREMENT`
 - `PUBLIC_TOKEN_TTL_HOURS`
 - `JWT_SECRET`
+
+## Persistência e dados
+
+A persistência efetiva do sistema vive nas tabelas Oracle com prefixo `MONT_*`
+(schema criado de forma idempotente por `src/server/db/initTables.ts` no boot).
+
+- O arquivo `.sqlite` (`DATABASE_FILE`) é **legado** e não é a fonte de verdade em
+  produção — não faça backup dele esperando conteúdo atual.
+- A integração WinThor é **somente leitura**; nunca é destino de escrita.
+- As migrações versionadas em `src/server/db/migrationRunner.ts` e
+  `allMigrations.ts` **não** rodam no boot atual (o schema vive em `initTables.ts`);
+  permanecem apenas como infraestrutura de referência/testes.
+
+## Backup e recuperação de desastre
+
+Backup lógico das tabelas `MONT_*` (um JSON por tabela + `_manifest.json`), sem
+exigir DBA/`expdp`. O script lê tudo dentro de uma transação `READ ONLY`, então o
+snapshot é consistente entre tabelas.
+
+### Rodar um backup
+
+```bash
+npm run backup
+```
+
+Requer no ambiente: `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_CONNECT_STRING`
+(o script falha rápido com mensagem clara se faltar alguma). A saída vai para
+`backups/<timestamp>/`. Esse diretório está no `.gitignore` e **contém dados
+pessoais (LGPD)** — trate como sensível: acesso restrito, retenção controlada e,
+de preferência, cópia criptografada fora da máquina.
+
+### Agendar backups
+
+- **Windows (Agendador de Tarefas):** crie uma tarefa diária que executa, no
+  diretório do projeto, `npm run backup`. Aponte "Iniciar em" para a raiz do
+  projeto e garanta que as variáveis Oracle estejam no ambiente do usuário/serviço
+  que roda a tarefa (ou carregue o `.env` antes).
+- **Linux (cron):** ex.: backup diário às 02:00 —
+  `0 2 * * * cd /caminho/app-montadores && npm run backup >> backups/cron.log 2>&1`
+
+Retenção sugerida: manter os últimos N diretórios `backups/*` e remover os mais
+antigos periodicamente (script externo/rotina de limpeza).
+
+### Restaurar (runbook)
+
+Cada `<tabela>.json` é um array de linhas no formato de objeto do Oracle
+(colunas em MAIÚSCULAS). Restauração é uma operação manual e deliberada — não há
+comando automático para evitar sobrescrita acidental de produção. Procedimento:
+
+1. **Confirme o alvo.** Aponte para o schema correto (`ORACLE_CONNECT_STRING`) e
+   confirme que é o ambiente que você pretende restaurar. Nunca restaure em
+   produção sem janela e aprovação.
+2. **Garanta o schema.** Suba a aplicação uma vez (ou rode o boot) para que
+   `initTables` crie as tabelas `MONT_*` vazias, se ainda não existirem.
+3. **Carregue os dados** do `backups/<timestamp>/` desejado, tabela por tabela,
+   respeitando dependências de chave (pais antes de filhos). Use `INSERT` a partir
+   do JSON via um script pontual/`sqlldr`/ferramenta de sua preferência.
+4. **Valide** contra o `_manifest.json` (contagem de linhas por tabela) e faça
+   verificações de sanidade no app (dashboard, pedidos, timeline).
+
+### Recuperação de desastre (resumo)
+
+1. Provisione uma instância Oracle e configure as variáveis de ambiente.
+2. Suba a aplicação para que `initTables` recrie o schema `MONT_*`.
+3. Restaure o backup lógico mais recente (passos acima).
+4. A integração WinThor é somente leitura e se reconecta por configuração — nada a
+   restaurar ali.
+5. Rode o smoke test manual (ver "Validação manual") antes de reabrir ao uso.
 
 ## Telas criadas
 

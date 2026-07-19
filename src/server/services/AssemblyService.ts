@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid";
 import { execDml, queryOne, withTransaction } from "../db/db";
 import { AppError, ForbiddenError } from "../errors";
+import { canTransition, type AssemblyStatus } from "./AssemblyStateMachine";
 import { EventService } from "./EventService";
 
 export class AssemblyService {
@@ -21,7 +22,8 @@ export class AssemblyService {
       throw new ForbiddenError("Você não tem permissão para operar esta montagem.");
     }
     // Só pode iniciar uma montagem AGENDADA (impede reabrir uma já em execução/finalizada).
-    if (job.status !== "AGENDADA") {
+    // Guarda centralizada na máquina de estados (AGENDADA → EM_EXECUCAO).
+    if (!canTransition(job.status as AssemblyStatus, "EM_EXECUCAO")) {
       throw new AppError(`Montagem no estado ${job.status} não pode ser iniciada.`, 409, "CONFLICT");
     }
 
@@ -100,7 +102,8 @@ export class AssemblyService {
     }
     // Só finaliza uma montagem EM_EXECUCAO. Impede refinalizar (que regrediria o
     // pagamento já bloqueado/liberado/pago de volta a AGUARDANDO_AVALIACAO_CLIENTE).
-    if (job.status !== "EM_EXECUCAO") {
+    // Guarda centralizada na máquina de estados (EM_EXECUCAO → FINALIZADA).
+    if (!canTransition(job.status as AssemblyStatus, "FINALIZADA")) {
       throw new AppError(`Montagem no estado ${job.status} não pode ser finalizada.`, 409, "CONFLICT");
     }
 

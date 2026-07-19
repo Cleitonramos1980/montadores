@@ -26,7 +26,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { SystemHealthPage } from "./pages/SystemHealthPage";
 import { EvaluationConfigPage } from "./pages/EvaluationConfigPage";
 import { ProviderProfilePage } from "./pages/ProviderProfilePage";
-import { getToken } from "./lib/api";
+import { getToken, getStoredUser } from "./lib/api";
 
 export function App() {
   const path = location.pathname;
@@ -44,7 +44,21 @@ export function App() {
     return null;
   }
 
-  // Redirect root to dashboard
+  // Guarda de papel no client (UX; o RBAC real permanece no backend).
+  // Montadores só acessam as rotas do app do montador — qualquer outra rota
+  // (incluindo o painel admin por URL direta) redireciona para a tela do montador.
+  // Papéis de staff mantêm o painel completo (comportamento preservado).
+  const roles = getStoredUser()?.roles ?? [];
+  const STAFF_ROLES = ["ADMIN", "GESTOR", "OPERACAO", "SAC", "FINANCEIRO", "CONSULTA"];
+  const isStaff = roles.some((r) => STAFF_ROLES.includes(r));
+  const isMontador = roles.includes("MONTADOR");
+  const MONTADOR_PATHS = ["/montadores/app", "/montadores/app/minhas-montagens"];
+  if (isMontador && !isStaff && !MONTADOR_PATHS.includes(path)) {
+    location.replace("/montadores/app");
+    return null;
+  }
+
+  // Redirect root to dashboard (staff). Montadores já foram redirecionados acima.
   if (path === "/montadores" || path === "/montadores/") {
     location.replace("/montadores/dashboard");
     return null;

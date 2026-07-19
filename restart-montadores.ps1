@@ -30,7 +30,10 @@ if ($Service -eq "all" -or $Service -eq "web") {
 if ($Service -eq "all" -or $Service -eq "api") {
     Write-Host "[api] Reiniciando montadores-api..."
     npx pm2 restart montadores-api --update-env 2>&1 | Out-Null
-    if (Wait-Http "http://localhost:3333/api/health" 30) { Write-Host "[api] OK" } else { Write-Host "[api] FALHOU" }
+    # /api/ready = readiness (503 quando o Oracle está fora); /api/health seria só
+    # liveness (sempre 200) e reportaria OK mesmo com o banco indisponível.
+    # Invoke-WebRequest lança em 503, então Wait-Http só retorna true em 200.
+    if (Wait-Http "http://localhost:3333/api/ready" 30) { Write-Host "[api] OK" } else { Write-Host "[api] FALHOU" }
 }
 
 Write-Host "Concluido."

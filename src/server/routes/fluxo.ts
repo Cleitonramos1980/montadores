@@ -7,6 +7,7 @@ import { DashboardPedidoFluxoService } from "../services/DashboardPedidoFluxoSer
 import { MessageLogService } from "../services/MessageLogService";
 import { MessageTriggerService } from "../services/MessageTriggerService";
 import { OrderSnapshotService } from "../services/OrderSnapshotService";
+import { InboundWebhookService } from "../services/InboundWebhookService";
 import { queryOne, queryRows } from "../db/db";
 
 export const fluxo = Router();
@@ -27,6 +28,13 @@ const dash  = new DashboardPedidoFluxoService();
 const msgLogs = new MessageLogService();
 const trigger = new MessageTriggerService();
 const snapshots = new OrderSnapshotService();
+const inbound = new InboundWebhookService();
+
+// Trava DRY_RUN permanente por ambiente: envio real só é liberado com MESSAGES_LIVE='true'
+// no processo. Enquanto não estiver, é proibido gravar qualquer modo de envio diferente de
+// DRY_RUN — nem pela config global, nem por evento.
+const MESSAGES_LOCKED = () => process.env.MESSAGES_LIVE !== "true";
+const isModeConfigKey = (k: string) => /MODE|MODO/.test(k.toUpperCase());
 
 // ── Sync config ───────────────────────────────────────────────────────────────
 
@@ -39,6 +47,14 @@ fluxo.put("/fluxo/sync/config", fluxoAdmin, asyncRoute(async (req, res) => {
     key:   z.string().min(1).max(100),
     value: z.string().max(500),
   }).parse(req.body);
+  // Bloqueia gravar MESSAGE_TRIGGER_MODE (ou chave de modo equivalente) com valor != DRY_RUN
+  // enquanto a trava de ambiente estiver ativa. Impede ligar PRODUCAO/HOMOLOGACAO por config.
+  if (isModeConfigKey(body.key) && body.value.trim().toUpperCase() !== "DRY_RUN" && MESSAGES_LOCKED()) {
+    res.status(400).json({
+      error: "Envio real bloqueado (DRY_RUN permanente). Modo de envio só pode ser 'DRY_RUN'; para liberar defina MESSAGES_LIVE=true no ambiente do servidor.",
+    });
+    return;
+  }
   await sync.setConfig(body.key, body.value);
   res.json({ ok: true });
 }));
@@ -133,6 +149,13 @@ fluxo.put("/fluxo/events/:key/config", fluxoAdmin, asyncRoute(async (req, res) =
     telefones_teste: z.string().max(1000).optional(),
     observacao:      z.string().max(1000).optional(),
   }).parse(req.body);
+  // Mesma trava por evento: não deixa ligar modo_envio != DRY_RUN enquanto MESSAGES_LIVE!='true'.
+  if (body.modo_envio && body.modo_envio !== "DRY_RUN" && MESSAGES_LOCKED()) {
+    res.status(400).json({
+      error: "Envio real bloqueado (DRY_RUN permanente). modo_envio só pode ser 'DRY_RUN'; para liberar defina MESSAGES_LIVE=true no ambiente do servidor.",
+    });
+    return;
+  }
   await dash.updateEventConfig(String(key), body);
   res.json({ ok: true });
 }));
@@ -167,6 +190,19 @@ fluxo.post("/fluxo/message-logs/:id/reenviar", fluxoAdmin, asyncRoute(async (req
     snapshot,
   );
   res.status(201).json(result);
+}));
+
+// ── Webhook de entrada (opt-out) ──────────────────────────────────────────────
+// Monta o InboundWebhookService numa rota do router 'fluxo' (já montado). Processa
+// mensagens recebidas do cliente; STOP/SAIR/PARAR grava o opt-out em MONT_CUSTOMERS.
+// Aceita o payload dos dois provedores (uazapiGO e Meta) — tenta uazapi e cai p/ Meta.
+// Nota: esta rota herda o authMiddleware do router; para recepção direta do provedor
+// (sem JWT), o mount público precisa ser feito em app.ts (fora do escopo deste arquivo).
+fluxo.post("/fluxo/inbound-webhook", asyncRoute(async (req, res) => {
+  const parsed = inbound.parseUazapi(req.body) ?? inbound.parseMeta(req.body);
+  if (!parsed) { res.status(400).json({ error: "Payload de webhook não reconhecido." }); return; }
+  const result = await inbound.handle(parsed);
+  res.json(result);
 }));
 
 // ── Diagnóstico WinThor ───────────────────────────────────────────────────────

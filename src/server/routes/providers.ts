@@ -24,14 +24,24 @@ async function assertProviderOwnership(req: Request, providerId: string): Promis
     !user.roles.includes("ADMIN") &&
     !user.roles.includes("GESTOR") &&
     !user.roles.includes("OPERACAO");
-  if (!isStrictMontador) return;
 
-  const provider = await queryOne<{ id: string }>(
-    "SELECT ID FROM MONT_PROVIDERS WHERE LOWER(EMAIL) = LOWER(:email) AND ACTIVE = 1",
-    { email: user.email },
-  );
-  if (!provider || provider.id !== providerId) {
-    throw new ForbiddenError("Acesso negado: você só pode gerenciar seus próprios dados de montador.");
+  if (isStrictMontador) {
+    const provider = await queryOne<{ id: string }>(
+      "SELECT ID FROM MONT_PROVIDERS WHERE LOWER(EMAIL) = LOWER(:email) AND ACTIVE = 1",
+      { email: user.email },
+    );
+    if (!provider || provider.id !== providerId) {
+      throw new ForbiddenError("Acesso negado: você só pode gerenciar seus próprios dados de montador.");
+    }
+    return;
+  }
+
+  // Não-montador: precisa ser staff autorizado a ver dados de prestador (perfil traz
+  // valores pagos/pendentes e comissões). CONSULTA (leitura restrita) fica de fora —
+  // antes qualquer papel autenticado passava direto.
+  const providerViewRoles = ["ADMIN", "GESTOR", "OPERACAO", "LOGISTICA", "SAC", "FINANCEIRO"];
+  if (!user.roles.some((r) => providerViewRoles.includes(r))) {
+    throw new ForbiddenError("Acesso negado: seu papel não pode acessar dados de prestador.");
   }
 }
 

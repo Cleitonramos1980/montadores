@@ -1,9 +1,15 @@
 /**
- * Bateria de testes de integração — App Montadores
- * Executa contra o servidor em http://localhost:3333
- * Rode com: npm test
+ * Bateria de testes de integração E2E — App Montadores
+ * Executa contra um servidor VIVO em http://localhost:3333 (Oracle/admin reais).
+ * NÃO é hermética: fica desligada por padrão para não quebrar checkout limpo/CI.
+ * Rode com: npm run test:e2e  (define RUN_E2E=1 e sobe o servidor antes).
  */
 import { describe, it, expect, beforeAll } from "vitest";
+
+// Só executa quando explicitamente habilitada via env (script test:e2e).
+// Sem o flag, todas as suítes abaixo são puladas (describe.skip).
+const RUN_E2E = process.env.RUN_E2E === "1";
+const suite = RUN_E2E ? describe : describe.skip;
 
 const BASE = "http://localhost:3333/api";
 const ADMIN_EMAIL    = "admin@montadores.com";
@@ -71,7 +77,7 @@ let evalToken = "";
 // 1. SAÚDE DO SISTEMA
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("1. Saúde do sistema", () => {
+suite("1. Saúde do sistema", () => {
   it("GET /health retorna ok e db ok", async () => {
     const r = await get("/health");
     expect(r.status).toBe(200);
@@ -92,7 +98,7 @@ describe("1. Saúde do sistema", () => {
 // 2. AUTENTICAÇÃO
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("2. Autenticação", () => {
+suite("2. Autenticação", () => {
   it("Login com credenciais corretas retorna token e user", async () => {
     const r = await post("/auth/login", { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
     expect(r.status).toBe(200);
@@ -153,7 +159,7 @@ describe("2. Autenticação", () => {
 // 3. SEGURANÇA — ROTAS PROTEGIDAS
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("3. Segurança — rotas protegidas sem token", () => {
+suite("3. Segurança — rotas protegidas sem token", () => {
   const protectedRoutes = [
     "/providers",
     "/payments",
@@ -179,7 +185,7 @@ describe("3. Segurança — rotas protegidas sem token", () => {
 // 4. ROTAS PÚBLICAS — sem autenticação
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("4. Rotas públicas (sem auth)", () => {
+suite("4. Rotas públicas (sem auth)", () => {
   it("GET /health é acessível sem token", async () => {
     const r = await get("/health");
     expect(r.status).toBe(200);
@@ -263,7 +269,7 @@ describe("4. Rotas públicas (sem auth)", () => {
 // 5. PROVEDORES — CRUD e transições de estado
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("5. Provedores", () => {
+suite("5. Provedores", () => {
   it("GET /providers retorna lista", async () => {
     const r = await get("/providers", adminToken);
     expect(r.status).toBe(200);
@@ -353,7 +359,7 @@ describe("5. Provedores", () => {
 // 6. TEMPLATES DE MENSAGEM
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("6. Templates de mensagem", () => {
+suite("6. Templates de mensagem", () => {
   it("GET /message-templates retorna lista com templates", async () => {
     const r = await get("/message-templates", adminToken);
     expect(r.status).toBe(200);
@@ -406,7 +412,7 @@ describe("6. Templates de mensagem", () => {
 // 7. RÉGUA DE FLUXO
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("7. Régua de fluxo", () => {
+suite("7. Régua de fluxo", () => {
   it("GET /flow-ruler retorna configuração de eventos", async () => {
     const r = await get("/flow-ruler", adminToken);
     expect(r.status).toBe(200);
@@ -424,7 +430,7 @@ describe("7. Régua de fluxo", () => {
 // 8. CONFIGURAÇÕES DE AVALIAÇÃO (CRUD completo)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("8. Configurações de avaliação", () => {
+suite("8. Configurações de avaliação", () => {
   it("GET /eval-configs retorna lista", async () => {
     const r = await get("/eval-configs", adminToken);
     expect(r.status).toBe(200);
@@ -555,7 +561,7 @@ describe("8. Configurações de avaliação", () => {
 // 9. LINKS DE AVALIAÇÃO (rota pública)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("9. Links de avaliação", () => {
+suite("9. Links de avaliação", () => {
   it("POST /eval-links gera link com URL absoluta (https://...)", async () => {
     const r = await post("/eval-links", {
       phase:  "ENTREGA",
@@ -610,7 +616,7 @@ describe("9. Links de avaliação", () => {
 // 10. ANALYTICS DE AVALIAÇÃO
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("10. Analytics de avaliação", () => {
+suite("10. Analytics de avaliação", () => {
   it("GET /eval-analytics?phase=ENTREGA retorna estrutura válida", async () => {
     const r = await get("/eval-analytics?phase=ENTREGA", adminToken);
     expect(r.status).toBe(200);
@@ -646,7 +652,7 @@ describe("10. Analytics de avaliação", () => {
 // 11. PAGAMENTOS E COMISSÕES
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("11. Pagamentos e comissões", () => {
+suite("11. Pagamentos e comissões", () => {
   it("GET /payments retorna lista paginada", async () => {
     const r = await get("/payments?page=1&pageSize=20", adminToken);
     expect(r.status).toBe(200);
@@ -690,7 +696,7 @@ describe("11. Pagamentos e comissões", () => {
 // 12. WINTHOR
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("12. WinThor", () => {
+suite("12. WinThor", () => {
   it("GET /winthor/orders retorna pedidos do WinThor", async () => {
     const r = await get("/winthor/orders?limit=5", adminToken);
     expect(r.status).toBe(200);
@@ -713,7 +719,7 @@ describe("12. WinThor", () => {
 // 13. MONTAGEM — jobs e agenda
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("13. Montagem — jobs e agenda", () => {
+suite("13. Montagem — jobs e agenda", () => {
   it("GET /assembly/jobs retorna lista de jobs de montagem", async () => {
     const r = await get("/assembly/jobs", adminToken);
     expect(r.status).toBe(200);
@@ -749,7 +755,7 @@ describe("13. Montagem — jobs e agenda", () => {
 // 14. DASHBOARD E PEDIDOS
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("14. Dashboard e pedidos", () => {
+suite("14. Dashboard e pedidos", () => {
   it("GET /dashboard retorna métricas gerais", async () => {
     const r = await get("/dashboard", adminToken);
     expect(r.status).toBe(200);
@@ -797,7 +803,7 @@ describe("14. Dashboard e pedidos", () => {
 // 15. NOTIFICAÇÕES E CONFIGURAÇÕES
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("15. Notificações e configurações", () => {
+suite("15. Notificações e configurações", () => {
   it("GET /notifications/summary retorna contadores de notificações", async () => {
     const r = await get("/notifications/summary", adminToken);
     expect(r.status).toBe(200);
@@ -814,7 +820,7 @@ describe("15. Notificações e configurações", () => {
 // 16. EDGE CASES — INPUTS MALICIOSOS
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("16. Edge cases e segurança de entrada", () => {
+suite("16. Edge cases e segurança de entrada", () => {
   it("Login com SQL injection no email não causa 500", async () => {
     const r = await post("/auth/login", {
       email: "' OR '1'='1",
@@ -866,7 +872,7 @@ describe("16. Edge cases e segurança de entrada", () => {
 // nas rotas administrativas/financeiras (regressão do bypass P0).
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("16b. RBAC — MONTADOR não acessa rotas privilegiadas", () => {
+suite("16b. RBAC — MONTADOR não acessa rotas privilegiadas", () => {
   let montadorToken = "";
 
   beforeAll(async () => {
@@ -918,7 +924,7 @@ describe("16b. RBAC — MONTADOR não acessa rotas privilegiadas", () => {
 // 17. LIMPEZA PÓS-TESTE
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("17. Limpeza pós-teste", () => {
+suite("17. Limpeza pós-teste", () => {
   it("DELETE /eval-configs/questions/:qid remove pergunta criada", async () => {
     if (!evalQuestionId) return;
     const r = await del(`/eval-configs/questions/${evalQuestionId}`, adminToken);

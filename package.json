@@ -13,8 +13,9 @@
     "seed": "tsx src/server/db/seed.ts",
     "backup": "tsx --env-file=.env src/server/scripts/backup-mont.ts",
     "restore": "tsx --env-file=.env src/server/scripts/restore-mont.ts",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/api.integration.test.ts'",
     "test:unit": "vitest run --exclude '**/api.integration.test.ts'",
+    "test:e2e": "RUN_E2E=1 vitest run src/tests/api.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

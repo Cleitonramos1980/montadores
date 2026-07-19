@@ -62,7 +62,6 @@ const revocationCache = new Map<string, { status: string; version: number; expir
  * todos os usuários — a janela de exposição é limitada pela expiração do token.
  */
 async function isTokenRevoked(payload: JwtPayload): Promise<boolean> {
-  if (typeof payload.tokenVersion !== "number") return false; // token legado — sem checagem
   const now = Date.now();
   let entry = revocationCache.get(payload.sub);
   if (!entry || entry.expiresAt < now) {
@@ -72,7 +71,7 @@ async function isTokenRevoked(payload: JwtPayload): Promise<boolean> {
         "SELECT STATUS, NVL(TOKEN_VERSION, 0) AS TOKEN_VERSION FROM MONT_USERS WHERE ID = :id",
         { id: payload.sub },
       );
-      if (!row) return false; // não confirmável — fail-open
+      if (!row) return false; // usuário não confirmável — fail-open
       entry = { status: row.status, version: Number(row.token_version ?? 0), expiresAt: now + REVOCATION_TTL_MS };
       revocationCache.set(payload.sub, entry);
     } catch {
@@ -80,6 +79,10 @@ async function isTokenRevoked(payload: JwtPayload): Promise<boolean> {
     }
   }
   if (entry.status !== "ATIVO") return true;
+  // Token sem tokenVersion: fail-CLOSED se o usuário já teve a versão incrementada
+  // (TOKEN_VERSION > 0) — força re-login para invalidar tokens legados emitidos
+  // antes de uma revogação. Só passa quando a versão do usuário ainda é 0.
+  if (typeof payload.tokenVersion !== "number") return entry.version > 0;
   if (entry.version !== payload.tokenVersion) return true;
   return false;
 }

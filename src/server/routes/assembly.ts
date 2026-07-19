@@ -21,6 +21,9 @@ const agendaEntrega     = new AgendaEntregaService();
 const assemblyOpRoles = requireRole("MONTADOR", "ADMIN", "GESTOR", "OPERACAO");
 const agendaRoles     = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA");
 const operacaoRoles   = requireRole("ADMIN", "GESTOR", "OPERACAO", "LOGISTICA");
+// Listagem de jobs traz PII do cliente (nome/telefone/endereço): MONTADOR vê só os seus
+// (filtro por provider), o staff operacional vê todos — CONSULTA fica de fora.
+const jobsReadRoles   = requireRole("MONTADOR", "ADMIN", "GESTOR", "OPERACAO", "LOGISTICA", "SAC", "FINANCEIRO");
 
 // Garante que MONTADOR só acessa seu próprio job — admin/gestor/operacao podem acessar qualquer um
 async function assertMontadorOwnsJob(req: Request, jobId: string): Promise<void> {
@@ -89,7 +92,7 @@ assemblyRouter.post("/assembly/:jobId/finish", assemblyOpRoles, asyncRoute(async
 }));
 
 // Assembly jobs list — montadores only see their own jobs
-assemblyRouter.get("/assembly/jobs", asyncRoute(async (req: Request, res: Response) => {
+assemblyRouter.get("/assembly/jobs", jobsReadRoles, asyncRoute(async (req: Request, res: Response) => {
   const isMontador = req.user!.roles.includes("MONTADOR") &&
     !req.user!.roles.includes("ADMIN") &&
     !req.user!.roles.includes("GESTOR");

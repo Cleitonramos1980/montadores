@@ -5,6 +5,7 @@ import { EventService } from "./EventService";
 import { AgendaEntregaService } from "./AgendaEntregaService";
 import { JobQueueService } from "./JobQueueService";
 import { WhatsAppProviderService } from "./WhatsAppProviderService";
+import { DispatchGateService } from "./DispatchGateService";
 import { logger } from "../logger";
 
 /**
@@ -35,6 +36,7 @@ export class MessageSchedulerService {
   private readonly events       = new EventService();
   private readonly agendaEntrega = new AgendaEntregaService();
   private readonly wp           = new WhatsAppProviderService();
+  private readonly gate         = new DispatchGateService();
 
   start(intervalMs = 15 * 60 * 1_000): void {
     if (this.intervalId) return;
@@ -189,24 +191,56 @@ export class MessageSchedulerService {
             }).catch(() => null);
             continue;
           }
+
+          // Opt-out ANTES de enviar: cliente que pediu SAIR/STOP nunca recebe (vale
+          // inclusive no redirecionamento de HOMOLOGACAO — não insistir com quem saiu).
+          const customer = await queryOne<{ opt_out_whatsapp: number }>(
+            "SELECT OPT_OUT_WHATSAPP FROM MONT_CUSTOMERS WHERE CODCLI = :codcli",
+            { codcli: String(row.codcli) },
+          ).catch(() => null);
+          if (Number(customer?.opt_out_whatsapp ?? 0) === 1) {
+            await msgLog.log({
+              numped, codcli: String(row.codcli),
+              eventKey: "LEMBRETE_AGENDAR_MONTAGEM",
+              status: "IGNORADO_OPT_OUT", modoEnvio: effectiveMode,
+            }).catch(() => null);
+            continue;
+          }
+
+          // Janela/gate ANTES de enviar (horário comercial, fim de semana, feriado).
+          // Fora da janela apenas adia: sem log/idempotência, o próximo ciclo dentro da
+          // janela reenvia (a chave semanal segue livre).
+          if (!this.gate.check({}).allowed) continue;
+
           const texto = renderTemplate(template.body, {
             nome: row.nome_cliente, cliente: row.nome_cliente, nome_cliente: row.nome_cliente, numped,
           });
-          const sendResult = await this.wp.send({ to: destino, text: texto, modo: effectiveMode });
-          const enviado = sendResult.status === "ENVIADO";
-          const { duplicate } = await msgLog.log({
+
+          // Reserva a idempotência ANTES do envio: grava o log ENVIADO já com a chave, de
+          // forma atômica (índice UNIQUE em IDEMPOTENCY_KEY). Se o processo cair após enviar,
+          // a chave já está persistida e o próximo ciclo não reenvia. Em falha do provider,
+          // rebaixa para ERRO e libera a chave (IDEMPOTENCY_KEY=NULL) para retry.
+          const { id: logId, duplicate } = await msgLog.log({
             numped, codcli: String(row.codcli),
             eventKey: "LEMBRETE_AGENDAR_MONTAGEM",
             templateId: template.id,
             destino,
-            status: enviado ? "ENVIADO" : "ERRO",
+            status: "ENVIADO",
             modoEnvio: effectiveMode,
-            // Consome idempotência só em envio bem-sucedido (permite reenvio após erro).
-            idempotencyKey: enviado ? idempotencyKey : undefined,
-            erro: sendResult.error ?? null,
-            payload: { nome_cliente: row.nome_cliente, destino_original: row.telefone, provider: sendResult.provider },
+            idempotencyKey,
+            payload: { nome_cliente: row.nome_cliente, destino_original: row.telefone },
           });
-          if (enviado && !duplicate) enviados++;
+          if (duplicate) continue; // outro ciclo já reservou/enviou esta chave
+
+          const sendResult = await this.wp.send({ to: destino, text: texto, modo: effectiveMode });
+          if (sendResult.status === "ENVIADO") {
+            enviados++;
+          } else {
+            await execDml(
+              "UPDATE MONT_MESSAGE_LOGS SET STATUS = 'ERRO', IDEMPOTENCY_KEY = NULL, ENVIADO_EM = NULL, ERRO = :erro WHERE ID = :id",
+              { erro: sendResult.error ?? "Falha no envio", id: logId },
+            ).catch((e) => logger.error({ err: (e as Error).message }, "[Scheduler] Falha ao rebaixar lembrete para ERRO:"));
+          }
         }
       }
 

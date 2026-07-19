@@ -20,6 +20,16 @@ function posicaoLabel(posicao: string): string {
   return map[code] ?? `Status ${code || "Em aberto"}`;
 }
 
+/**
+ * No Oracle, string vazia ('') é tratada como NULL. Bindar '' em coluna NOT NULL
+ * dispara ORA-01400. s() converte vazio/undefined em um default NÃO-NULL seguro,
+ * preservando valores legítimos intactos.
+ */
+function s(v: unknown, fallback: string): string {
+  const str = String(v ?? "");
+  return str === "" ? fallback : str;
+}
+
 export class WinthorSyncService {
   constructor(
     private readonly adapter = new WinthorAdapter(),
@@ -93,8 +103,8 @@ export class WinthorSyncService {
             {
               id: uuid(),
               orderId,
-              productId: String(item.CODPROD ?? ""),
-              description: String(item.DESCRICAO ?? ""),
+              productId: s(item.CODPROD, "SEM_CODIGO"),
+              description: s(item.DESCRICAO, "SEM DESCRICAO"),
               quantity: Number(item.QT ?? 0),
               requiresAssembly: Number(item.REQUER_MONTAGEM ?? 0),
               assemblyCost: Number(item.VLMAODEOBRA ?? 0),

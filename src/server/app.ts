@@ -10,6 +10,7 @@ import { AppError } from "./errors";
 import { logger } from "./logger";
 import { buildOpenApiSpec } from "./openapi";
 import { verifySignedFile } from "./middleware/signedFile";
+import { authMiddleware } from "./middleware/auth";
 import { api } from "./routes/api";
 import { fluxo } from "./routes/fluxo";
 import { providersRouter } from "./routes/providers";
@@ -48,6 +49,9 @@ const DEV_TUNNEL_PATTERNS = [
 export function createApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
+  // Necessário atrás do túnel/reverse-proxy para o express-rate-limit enxergar o
+  // IP real do cliente (X-Forwarded-For) em vez do IP do proxy.
+  app.set("trust proxy", 1);
 
   app.use(
     cors({
@@ -91,41 +95,41 @@ export function createApp(): express.Express {
     next();
   });
 
-  // ── Rate limiting — produção only ─────────────────────────────────────────
-  if (config.isProduction) {
-    app.use(
-      "/api/auth/login",
-      rateLimit({
-        windowMs: 15 * 60 * 1000,
-        max: 20,
-        message: { error: "Muitas tentativas. Tente novamente em 15 minutos." },
-        standardHeaders: true,
-        legacyHeaders: false,
-      }),
-    );
-    app.use(
-      "/api/auth/forgot-password",
-      rateLimit({
-        windowMs: 60 * 60 * 1000,
-        max: 5,
-        message: { error: "Limite de tentativas excedido." },
-        standardHeaders: true,
-        legacyHeaders: false,
-      }),
-    );
-    // Rotas públicas (sem auth) — protege contra abuso/enumeração de token e
-    // escrita anônima (cadastro de montador, respostas de avaliação, agendamento).
-    app.use(
-      "/api/public",
-      rateLimit({
-        windowMs: 15 * 60 * 1000,
-        max: 60,
-        message: { error: "Muitas requisições. Tente novamente em alguns minutos." },
-        standardHeaders: true,
-        legacyHeaders: false,
-      }),
-    );
-  }
+  // ── Rate limiting — todos os ambientes ─────────────────────────────────────
+  // Aplicado sempre (não só em produção): login, recuperação de senha e rotas
+  // públicas são alvo de abuso/enumeração independentemente do ambiente.
+  app.use(
+    "/api/auth/login",
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 20,
+      message: { error: "Muitas tentativas. Tente novamente em 15 minutos." },
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  );
+  app.use(
+    "/api/auth/forgot-password",
+    rateLimit({
+      windowMs: 60 * 60 * 1000,
+      max: 5,
+      message: { error: "Limite de tentativas excedido." },
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  );
+  // Rotas públicas (sem auth) — protege contra abuso/enumeração de token e
+  // escrita anônima (cadastro de montador, respostas de avaliação, agendamento).
+  app.use(
+    "/api/public",
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 60,
+      message: { error: "Muitas requisições. Tente novamente em alguns minutos." },
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  );
 
   // ── Static uploads ─────────────────────────────────────────────────────────
   // Protegido por URL assinada (HMAC+expiração) — antes era servido publicamente
@@ -151,13 +155,30 @@ export function createApp(): express.Express {
     }));
   }
 
-  app.use("/api", api);
-  app.use("/api", fluxo);
+  // ── Autenticação /api — gate único ──────────────────────────────────────────
+  // O authMiddleware precisa popular req.user ANTES dos routers dedicados
+  // (providers/evaluations/payments/assembly/users), pois eles NÃO aplicam o
+  // middleware por conta própria — antes dependiam do router "api", montado
+  // primeiro, que os sombreava. Com "api" agora no fim, este gate garante a
+  // autenticação. Rotas públicas (login, health, /public/*) passam sem auth.
+  const PUBLIC_API = /^\/(?:health|ready|auth\/(?:login|forgot-password)|public(?:\/|$))/;
+  app.use("/api", (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.method === "OPTIONS" || PUBLIC_API.test(req.path)) { next(); return; }
+    authMiddleware(req, res, next);
+  });
+
+  // Routers dedicados ANTES de "api": suas guardas de RBAC/ownership passam a
+  // resolver as rotas que "api" sombreava (assembly/payments/providers/etc.).
   app.use("/api", providersRouter);
   app.use("/api", evaluationsRouter);
   app.use("/api", paymentsRouter);
   app.use("/api", assemblyRouter);
   app.use("/api", usersRouter);
+  // "api" no fim: serve apenas as rotas exclusivas dele (+ as rotas públicas).
+  app.use("/api", api);
+  // fluxo e lgpd têm authMiddleware próprio (bloqueariam rotas públicas se
+  // montados antes de "api"), por isso vêm depois dele.
+  app.use("/api", fluxo);
   app.use("/api", lgpdRouter);
 
   // ── Error handler ──────────────────────────────────────────────────────────
@@ -185,23 +206,14 @@ export function createApp(): express.Express {
       return;
     }
 
-    // Generic Error — suppress ORA-XXXXX codes from clients
-    let message = "Erro inesperado";
-    if (err instanceof Error) {
-      message = err.message;
-    } else if (typeof err === "string") {
-      message = err;
-    } else {
-      logger.error({ err, requestId: req.requestId }, "non-Error thrown");
-    }
-
-    if (/ORA-\d{5}/.test(message)) {
-      logger.error({ originalMessage: message, requestId: req.requestId }, "Oracle error suppressed from client");
-      res.status(500).json({ error: "Erro interno do servidor." });
-      return;
-    }
-
-    res.status(400).json({ error: message });
+    // Qualquer outro erro é um 5xx: loga internamente (com a mensagem original,
+    // incluindo eventuais ORA-XXXXX) mas responde genérico, sem vazar detalhes
+    // (Error.message cru, códigos Oracle, stacks) ao cliente.
+    let logMessage = "Erro inesperado";
+    if (err instanceof Error) logMessage = err.message;
+    else if (typeof err === "string") logMessage = err;
+    logger.error({ err, originalMessage: logMessage, requestId: req.requestId }, "unhandled error");
+    res.status(500).json({ error: "Erro interno do servidor." });
   });
 
   return app;

@@ -7,6 +7,18 @@
 // Usa node diretamente (sem cmd.exe) para evitar janelas visíveis no Windows.
 // tsx CLI: node_modules/tsx/dist/cli.mjs
 // Vite:   node_modules/vite/bin/vite.js
+//
+// Fonte ÚNICA de verdade do PM2: este arquivo. (O antigo pm2.config.cjs, que
+// apontava para dist/server/index.js — nunca gerado — foi removido.)
+//
+// ── Rotação de logs (obrigatória para não crescer sem limite) ────────────────
+// O PM2 core não rotaciona logs; instale e configure o módulo pm2-logrotate UMA vez:
+//   pm2 install pm2-logrotate
+//   pm2 set pm2-logrotate:max_size 10M        # rotaciona ao atingir 10 MB
+//   pm2 set pm2-logrotate:retain 14           # mantém as últimas 14 rotações
+//   pm2 set pm2-logrotate:compress true       # comprime as rotações antigas (.gz)
+//   pm2 set pm2-logrotate:rotateInterval '0 0 * * *'  # rotação diária à meia-noite
+// A config do módulo é persistida pelo PM2, independe deste arquivo.
 
 module.exports = {
   apps: [

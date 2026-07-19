@@ -4,6 +4,7 @@ import { authMiddleware, requireRole } from "../middleware/auth";
 import { execDml, queryOne } from "../db/db";
 import { AppError } from "../errors";
 import { AuditService } from "../services/AuditService";
+import { LgpdExportService } from "../services/LgpdExportService";
 import { asyncRoute, param } from "../utils/route";
 
 // Endpoints de titularidade de dados (LGPD). Anonimização preserva CODCLI e vínculos
@@ -13,6 +14,7 @@ lgpdRouter.use(authMiddleware);
 
 const onlyAdmin = requireRole("ADMIN", "GESTOR");
 const audit = new AuditService();
+const exporter = new LgpdExportService();
 
 // POST /api/lgpd/customers/:id/anonymize  { reason }
 lgpdRouter.post("/lgpd/customers/:id/anonymize", onlyAdmin, asyncRoute(async (req, res) => {
@@ -42,4 +44,25 @@ lgpdRouter.post("/lgpd/customers/:id/anonymize", onlyAdmin, asyncRoute(async (re
   });
 
   res.json({ ok: true, anonymized: cust.codcli });
+}));
+
+// GET /api/lgpd/customers/:id/export
+// Portabilidade de dados pessoais (LGPD art. 18). Reúne, SOMENTE-LEITURA, os
+// dados do titular em um JSON estruturado. Restrito a ADMIN/GESTOR (onlyAdmin)
+// e sob autenticação (authMiddleware aplicado no router).
+lgpdRouter.get("/lgpd/customers/:id/export", onlyAdmin, asyncRoute(async (req, res) => {
+  const id = param(req.params.id);
+  const data = await exporter.exportCustomerData(id);
+
+  // Trilha obrigatória: exportação de dados pessoais é evento auditável.
+  await audit.log({
+    actorUserId: req.user?.sub,
+    action: "LGPD_EXPORT",
+    entityType: "customer",
+    entityId: id,
+    justification: `Exportação de dados pessoais por ${req.user?.email ?? "?"}`,
+    ip: req.ip,
+  });
+
+  res.json(data);
 }));

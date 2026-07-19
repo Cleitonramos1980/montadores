@@ -13,7 +13,9 @@ export class ProviderService {
   async register(input: Record<string, unknown>) {
     const id = uuid();
 
-    // If no codfornec was provided and Oracle is available, insert into PCFORNEC
+    // WinThor é SOMENTE LEITURA por padrão. A gravação em MONT_PROVIDERS SEMPRE ocorre;
+    // a escrita no ERP (PCFORNEC) só é tentada se ERP_WRITE_ENABLED === 'true'
+    // (o próprio insertSupplier aplica a flag e retorna null quando desligada).
     let codfornec = input.codfornec ? String(input.codfornec) : null;
     if (!codfornec && isOracleEnabled()) {
       try {
@@ -28,8 +30,11 @@ export class ProviderService {
           telrep:     input.phone      ? String(input.phone).replace(/\D/g, "") : undefined,
           email:      input.email      ? String(input.email)      : undefined,
         });
-        codfornec = String(newCode);
-        logger.info({ codfornec: newCode }, "[provider] fornecedor inserido na PCFORNEC");
+        if (newCode != null) {
+          codfornec = String(newCode);
+          logger.info({ codfornec: newCode }, "[provider] fornecedor inserido na PCFORNEC");
+        }
+        // newCode null → ERP_WRITE_ENABLED desligada: segue sem codfornec (pendente).
       } catch (err) {
         // Non-fatal: PCFORNEC insert failure should not block MONT_PROVIDERS registration
         logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[provider] falha ao inserir na PCFORNEC");

@@ -84,10 +84,12 @@ export class ProviderMatchingService {
         if (distanceKm > radius) continue;
         matchReason = `geo_${Math.round(distanceKm)}km`;
       } else if (ctx.clientCity && ctx.clientUf) {
-        if (
-          p.city?.toLowerCase() !== ctx.clientCity.toLowerCase() &&
-          p.uf?.toLowerCase() !== ctx.clientUf?.toLowerCase()
-        ) {
+        // Só é "mesma cidade" quando cidade E uf batem. Se qualquer um diferir, tenta o
+        // fallback por regiões — não trata UF igual (estado inteiro) como se fosse a mesma cidade.
+        const sameCity =
+          p.city?.toLowerCase() === ctx.clientCity.toLowerCase() &&
+          p.uf?.toLowerCase() === ctx.clientUf.toLowerCase();
+        if (!sameCity) {
           try {
             const regions: string[] = JSON.parse(p.regions_json ?? "[]");
             if (!regions.includes(ctx.clientCity) && !regions.includes(ctx.clientUf ?? "")) {

@@ -88,11 +88,15 @@ export class MessageLogService {
   }
 
   async getSendHistory(baseKey: string): Promise<{ resendCount: number; lastSentAt: Date | null }> {
+    // As event keys contêm "_" (ex.: LEMBRETE_AGENDAR_MONTAGEM), que é curinga no LIKE.
+    // Sem ESCAPE, a contagem de reenvio vazaria entre eventos com nomes parecidos. Escapa
+    // "\", "%" e "_" no prefixo e usa ESCAPE '\' — só o "%" final permanece como curinga.
+    const escapedBase = baseKey.replace(/([\\%_])/g, "\\$1");
     const row = await queryOne<{ cnt: number; last_sent: Date | null }>(
       `SELECT COUNT(*) AS CNT, MAX(ENVIADO_EM) AS LAST_SENT
        FROM MONT_MESSAGE_LOGS
-       WHERE IDEMPOTENCY_KEY LIKE :keyPattern AND STATUS = 'ENVIADO'`,
-      { keyPattern: `${baseKey}%` },
+       WHERE IDEMPOTENCY_KEY LIKE :keyPattern ESCAPE '\\' AND STATUS = 'ENVIADO'`,
+      { keyPattern: `${escapedBase}%` },
     );
     return {
       resendCount: Number(row?.cnt ?? 0),

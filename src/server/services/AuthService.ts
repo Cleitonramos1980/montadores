@@ -8,8 +8,13 @@ import { signJwt } from "../middleware/auth";
 
 const BCRYPT_ROUNDS = 12;
 
+// Pepper dedicado ao hash legado SHA-256, desacoplado do JWT_SECRET para que a
+// rotação de JWT não invalide logins legados. Fallback para jwtSecret mantém a
+// validação dos hashes já emitidos (retrocompatível).
+const LEGACY_PASSWORD_PEPPER = process.env.PASSWORD_PEPPER ?? config.jwtSecret;
+
 function hashPasswordSha256(password: string): string {
-  return createHash("sha256").update(`${password}:montadores:${config.jwtSecret}`).digest("hex");
+  return createHash("sha256").update(`${password}:montadores:${LEGACY_PASSWORD_PEPPER}`).digest("hex");
 }
 
 function isBcryptHash(h: string): boolean {

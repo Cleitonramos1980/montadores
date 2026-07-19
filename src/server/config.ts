@@ -70,3 +70,29 @@ if (!config.corsOrigins) {
   }
   console.warn("[SEGURANÇA] CORS_ORIGINS não configurado. Todas as origens são permitidas (apenas para dev).");
 }
+
+// Considera fraco: ausente OU igual ao padrão de seed conhecido publicamente.
+const weakAdminPassword =
+  !process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === "Admin@2026!";
+
+if (weakAdminPassword) {
+  if (isProduction) {
+    console.error("[SEGURANÇA FATAL] ADMIN_PASSWORD ausente ou igual ao padrão conhecido em produção. Servidor abortado.");
+    process.exit(1);
+  }
+  console.warn("[SEGURANÇA] ADMIN_PASSWORD ausente ou padrão. Defina uma senha forte antes de produção!");
+}
+
+// Portão de mensageria (visibilidade no boot): enviar WhatsApp real com provedor
+// NÃO-oficial arrisca banimento permanente do número. O bloqueio efetivo está no
+// WhatsAppProviderService (envio real só por via oficial Meta); aqui apenas alertamos
+// com destaque quando o modo real está ligado sem via oficial reconhecida.
+if (process.env.MESSAGES_LIVE === "true") {
+  const officialMeta = !!process.env.META_PHONE_ID && !!process.env.META_WHATSAPP_TOKEN;
+  if (!officialMeta && process.env.WHATSAPP_OFFICIAL_ACK !== "true") {
+    console.warn(
+      "[MENSAGERIA] MESSAGES_LIVE=true SEM provedor oficial (Meta): envios reais serão BLOQUEADOS (SIMULADO) " +
+      "por segurança. Configure a Meta Cloud API ou defina WHATSAPP_OFFICIAL_ACK=true para liberar (ciente do risco de ban).",
+    );
+  }
+}

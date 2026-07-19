@@ -68,15 +68,22 @@ export class PaymentService {
       throw new AppError(`Pagamento no estado ${payment.status} não pode ser liberado novamente.`, 409, "CONFLICT");
     }
 
+    // Checa SAC aberto por PEDIDO (não por job): o canal de avaliação novo abre SAC com
+    // ASSEMBLY_JOB_ID nulo; filtrar por job deixaria esses SACs invisíveis e furaria o
+    // bloqueio. Qualquer SAC aberto no pedido impede a liberação.
     const sacOpen = await queryOne<{ value: number }>(
       `SELECT COUNT(*) AS VALUE FROM MONT_SAC_CASES
-       WHERE ASSEMBLY_JOB_ID = :jobId AND STATUS NOT IN ('RESOLVIDO','ENCERRADO','CANCELADO')`,
-      { jobId: payment.assembly_job_id },
+       WHERE ORDER_ID = :orderId AND STATUS NOT IN ('RESOLVIDO','ENCERRADO','CANCELADO')`,
+      { orderId: payment.order_id },
     );
     if (Number(sacOpen?.value ?? 0) > 0) throw new Error("Pagamento não pode ser liberado com SAC aberto.");
 
+    // Condicionado ao status (defesa em profundidade, além da guarda acima): dois
+    // release() concorrentes não regridem um pagamento já avançado. Inclui PROCESSANDO_PIX
+    // (PIX em andamento) e CANCELADO (não ressuscitar pagamento cancelado).
     await execDml(
-      "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', BLOCKED_REASON = NULL, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
+      `UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'LIBERADO', BLOCKED_REASON = NULL, UPDATED_AT = SYSTIMESTAMP
+       WHERE ID = :id AND STATUS NOT IN ('LIBERADO','PROGRAMADO','PAGO','PROCESSANDO_PIX','CANCELADO')`,
       { id: paymentId },
     );
 
@@ -122,6 +129,16 @@ export class PaymentService {
     // Atômico: marcar PAGO + registrar log + concluir pedido são tudo-ou-nada.
     // Se qualquer passo falhar, nada é commitado (evita pagamento "meio-feito").
     await withTransaction(async (tx) => {
+      // Lock pessimista da linha do pagamento: serializa dois pay() concorrentes. O
+      // segundo espera o commit do primeiro, re-lê STATUS='PAGO' e aborta aqui — sem log
+      // de aprovação nem conclusão de pedido duplicados (fecha o TOCTOU da checagem acima).
+      const locked = await tx.queryOne<{ status: string }>(
+        "SELECT STATUS FROM MONT_PROVIDER_PAYMENTS WHERE ID = :id FOR UPDATE",
+        { id: paymentId },
+      );
+      if (!locked || !["PROGRAMADO", "LIBERADO"].includes(locked.status)) {
+        throw new AppError("Pagamento não está em estado pagável (pode já ter sido pago).", 409, "CONFLICT");
+      }
       await tx.exec(
         "UPDATE MONT_PROVIDER_PAYMENTS SET STATUS = 'PAGO', PAID_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP WHERE ID = :id",
         { id: paymentId },

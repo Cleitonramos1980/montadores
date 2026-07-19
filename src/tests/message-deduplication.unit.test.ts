@@ -145,7 +145,7 @@ describe("MessageTriggerService — Deduplicação de Mensagens", () => {
 
       await svc.process({ ...baseEvent, id: "evt-qualquer" }, baseSnapshot);
 
-      expect(checkIdempotency).toHaveBeenCalledWith("fluxo:99999:PEDIDO_CRIADO", "DRY_RUN");
+      expect(checkIdempotency).toHaveBeenCalledWith("dry:fluxo:99999:PEDIDO_CRIADO", "DRY_RUN");
     });
 
     it("log de DRY_RUN inclui idempotencyKey para persistência da deduplicação", async () => {
@@ -158,7 +158,7 @@ describe("MessageTriggerService — Deduplicação de Mensagens", () => {
       await svc.process(baseEvent, baseSnapshot);
 
       expect(logFn).toHaveBeenCalledWith(expect.objectContaining({
-        idempotencyKey: "fluxo:99999:PEDIDO_CRIADO",
+        idempotencyKey: "dry:fluxo:99999:PEDIDO_CRIADO",
         status:         "SIMULADO_DRY_RUN",
       }));
     });
@@ -523,7 +523,7 @@ describe("MessageTriggerService — Deduplicação de Mensagens", () => {
       }));
     });
 
-    it("variável desconhecida permanece com placeholder {{var}}", async () => {
+    it("variável desconhecida NÃO é enviada — placeholder cru bloqueia o envio (status ERRO)", async () => {
       setupProductionDb({ template: { id: "t1", body: "Código: {{codigoDesconhecido}}", active: 1, send_hour_start: 8, send_hour_end: 21 } });
       const checkIdempotency = vi.fn().mockResolvedValue(false);
       const send             = vi.fn().mockResolvedValue({ status: "ENVIADO" });
@@ -531,11 +531,12 @@ describe("MessageTriggerService — Deduplicação de Mensagens", () => {
       mockLogs.checkIdempotency = checkIdempotency;
       const svc = new MessageTriggerService(mockLogs, { send } as any, mockGate);
 
-      await svc.process(baseEvent, baseSnapshot);
+      const r = await svc.process(baseEvent, baseSnapshot);
 
-      expect(send).toHaveBeenCalledWith(expect.objectContaining({
-        text: "Código: {{codigoDesconhecido}}",
-      }));
+      // Guard anti-texto-cru: nunca manda "{{...}}" literal ao cliente — bloqueia e marca ERRO.
+      expect(send).not.toHaveBeenCalled();
+      expect(r.status).toBe("ERRO");
+      expect(r.reason).toContain("Placeholders não resolvidos");
     });
   });
 });

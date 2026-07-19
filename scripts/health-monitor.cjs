@@ -13,11 +13,13 @@
  * Config via env:
  *   MONITOR_BASE_URL      (default http://localhost:3333)
  *   MONITOR_INTERVAL_MS   (default 60000)
- *   ALERT_WEBHOOK_URL     (opcional — canal de alerta)
+ *   ALERT_WEBHOOK_URL     (opcional — canal de alerta; alias: HEALTH_ALERT_WEBHOOK)
+ *   HEALTH_ALERT_WEBHOOK  (opcional — mesmo efeito; se ambos definidos, ALERT_WEBHOOK_URL vence)
  */
 const BASE = process.env.MONITOR_BASE_URL || "http://localhost:3333";
 const INTERVAL = Number(process.env.MONITOR_INTERVAL_MS || 60_000);
-const WEBHOOK = process.env.ALERT_WEBHOOK_URL || "";
+// Aceita ambos os nomes; se nenhum definido, o monitor mantém só o log estruturado no stdout.
+const WEBHOOK = process.env.ALERT_WEBHOOK_URL || process.env.HEALTH_ALERT_WEBHOOK || "";
 
 let lastHealthy = null; // null = ainda não avaliado
 

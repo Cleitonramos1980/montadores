@@ -84,17 +84,16 @@ const schemas = {
       supportPhone: { type: "string", nullable: true },
     },
   },
-  JobQueue: {
+  Commission: {
     type: "object",
     properties: {
-      id:          { type: "integer" },
-      jobType:     { type: "string", example: "WHATSAPP_MESSAGE" },
-      status:      { type: "string", enum: ["PENDING", "RUNNING", "DONE", "FAILED"] },
-      attempts:    { type: "integer" },
-      maxAttempts: { type: "integer" },
-      nextRunAt:   { type: "string", format: "date-time" },
-      lastError:   { type: "string", nullable: true },
-      createdAt:   { type: "string", format: "date-time" },
+      id:                 { type: "string" },
+      codprod:            { type: "string", description: "Código do produto WinThor" },
+      description:        { type: "string" },
+      vlmaodeobra:        { type: "number", description: "Valor de mão de obra (referência WinThor)" },
+      commission_percent: { type: "number", description: "Percentual de comissão aplicado sobre a base" },
+      active:             { type: "integer", enum: [0, 1] },
+      notes:              { type: "string", nullable: true },
     },
   },
 };
@@ -152,15 +151,6 @@ const paths: Record<string, unknown> = {
         200: { description: "Usuário", content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse/properties/user" } } } },
         401: { description: "Não autenticado" },
       },
-    },
-  },
-
-  "/auth/logout": {
-    post: {
-      tags: ["Autenticação"],
-      summary: "Logout (invalida sessão no cliente)",
-      security: [{ BearerAuth: [] }],
-      responses: { 200: { description: "Deslogado" } },
     },
   },
 
@@ -313,30 +303,40 @@ const paths: Record<string, unknown> = {
     },
   },
 
-  "/admin/jobs": {
+  "/commissions": {
     get: {
-      tags: ["Jobs"],
-      summary: "Lista jobs na fila (ADMIN)",
+      tags: ["Comissões"],
+      summary: "Lista comissões de produto configuradas",
       security: [{ BearerAuth: [] }],
-      parameters: [
-        { name: "status", in: "query", schema: { type: "string", enum: ["PENDING","RUNNING","DONE","FAILED"] } },
-        { name: "limit",  in: "query", schema: { type: "integer", default: 50 } },
-      ],
       responses: {
-        200: { description: "Jobs", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/JobQueue" } } } } },
+        200: { description: "Comissões", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Commission" } } } } },
       },
     },
   },
 
-  "/admin/jobs/{id}/retry": {
-    post: {
-      tags: ["Jobs"],
-      summary: "Recoloca job FAILED em PENDING para novo processamento (ADMIN)",
+  "/commissions/{codprod}": {
+    put: {
+      tags: ["Comissões"],
+      summary: "Cria ou atualiza a comissão de um produto (ADMIN/GESTOR)",
       security: [{ BearerAuth: [] }],
-      parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+      parameters: [{ name: "codprod", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: {
+          type: "object", required: ["description", "commissionPercent"],
+          properties: {
+            description:       { type: "string", minLength: 2 },
+            vlmaodeobra:       { type: "number", minimum: 0, default: 0 },
+            commissionPercent: { type: "number", minimum: 0.01, maximum: 100 },
+            active:            { type: "boolean", default: true },
+            notes:             { type: "string" },
+          },
+        }}},
+      },
       responses: {
-        200: { description: "Reenfileirado" },
-        404: { description: "Job não encontrado ou não está FAILED" },
+        200: { description: "Comissão salva", content: { "application/json": { schema: { $ref: "#/components/schemas/Commission" } } } },
+        403: { description: "Permissão insuficiente" },
+        422: { description: "Dados inválidos" },
       },
     },
   },
@@ -360,7 +360,7 @@ export function buildOpenApiSpec(baseUrl: string) {
       { name: "Pedidos",        description: "Pedidos WinThor sincronizados" },
       { name: "Régua de Fluxo", description: "Configuração de eventos e mensagens" },
       { name: "Avaliações",     description: "Configurações de formulários de avaliação" },
-      { name: "Jobs",           description: "Fila de jobs com retry automático" },
+      { name: "Comissões",      description: "Comissões de produto por CODPROD" },
     ],
     components: {
       securitySchemes: bearer,

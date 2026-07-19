@@ -66,7 +66,11 @@ export class MessageTriggerService {
 
     // 3. DRY_RUN: short-circuit with deduplication — never calls WhatsApp
     if (effectiveMode === "DRY_RUN") {
-      const idempotencyKey = `fluxo:${event.numped}:${event.eventKey}`;
+      // Chave PREFIXADA com "dry:" para NUNCA colidir com a chave do envio real
+      // (fluxo:...). Como o índice UNIQUE em IDEMPOTENCY_KEY cobre todos os status, uma
+      // chave compartilhada faria o envio real colidir com a simulação e reenviar em loop
+      // ao promover o modo. O prefixo isola completamente a trilha simulada da real.
+      const idempotencyKey = `dry:fluxo:${event.numped}:${event.eventKey}`;
       const alreadySent = await this.logs.checkIdempotency(idempotencyKey, "DRY_RUN");
       if (alreadySent) {
         return { status: "IGNORADO_DUPLICIDADE", reason: "Já simulado (idempotência DRY_RUN)" };
@@ -220,12 +224,54 @@ export class MessageTriggerService {
     }
 
     // 8. Render template and send
+    // CTA da jornada: quando o template referencia {{link_jornada}}, gera o link público
+    // (token de jornada) do pedido. Sem link resolvido, o guard de placeholders abaixo
+    // bloqueia o envio — nunca manda o texto cru "{{link_jornada}}" ao cliente.
+    let linkJornada: string | undefined;
+    if (/\{\{link_jornada\}\}/.test(template.body)) {
+      try {
+        const ord = await queryOne<{ id: string }>(
+          "SELECT ID FROM MONT_ORDERS WHERE NUMPED = :numped",
+          { numped: event.numped },
+        );
+        if (ord?.id) {
+          const { TokenService } = await import("./TokenService");
+          const { url } = await new TokenService().create(ord.id, "JORNADA_CLIENTE");
+          linkJornada = url;
+        }
+      } catch {
+        // Falha ao gerar o link é tratada pelo guard de placeholders (bloqueia o envio).
+      }
+    }
+
     const renderedText = renderTemplate(template.body, {
-      nome:    snapshot.nome_cliente,
-      numped:  snapshot.numped,
-      numnota: snapshot.numnota ?? undefined,
-      codcli:  snapshot.codcli,
+      nome:         snapshot.nome_cliente,
+      cliente:      snapshot.nome_cliente,
+      numped:       snapshot.numped,
+      numnota:      snapshot.numnota ?? undefined,
+      codcli:       snapshot.codcli,
+      link_jornada: linkJornada,
     });
+
+    // Guard anti-texto-cru: se sobrou algum {{placeholder}} não resolvido após a
+    // substituição, NÃO envia — registra ERRO com diagnóstico. Evita mandar ao cliente
+    // uma mensagem com "{{...}}" literal (link, montador, protocolo etc. não resolvidos).
+    const unresolved = renderedText.match(/\{\{\w+\}\}/g);
+    if (unresolved && unresolved.length > 0) {
+      const faltantes = [...new Set(unresolved)];
+      const { id } = await this.logs.log({
+        numped:    event.numped,
+        codcli:    event.codcli,
+        eventKey:  event.eventKey,
+        templateId: template.id,
+        destino:   destPhone,
+        status:    "ERRO",
+        modoEnvio: effectiveMode,
+        erro:      `Placeholders não resolvidos: ${faltantes.join(", ")}`,
+        payload:   { placeholders_nao_resolvidos: faltantes },
+      });
+      return { status: "ERRO", reason: "Placeholders não resolvidos no template", logId: id };
+    }
 
     const sendResult = await this.wp.send({ to: destPhone, text: renderedText, modo: effectiveMode });
 
